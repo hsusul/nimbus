@@ -8,6 +8,7 @@ import type { Router } from "express";
 import { Router as createRouter } from "express";
 import { z } from "zod";
 
+import type { DownloadService } from "../services/downloads";
 import type { FileService } from "../services/files";
 import type { UserService } from "../services/users";
 import { getAuditContext, requireActiveInternalUser } from "./route-context";
@@ -16,7 +17,11 @@ const FileListQuerySchema = CursorPaginationQuerySchema.extend({
   folderId: z.string().min(1).optional(),
 });
 
-export function filesRouter(fileService: FileService, userService: UserService): Router {
+export function filesRouter(
+  fileService: FileService,
+  userService: UserService,
+  downloadService: DownloadService,
+): Router {
   const router = createRouter();
 
   router.get("/api/v1/files", async (req, res, next) => {
@@ -43,6 +48,23 @@ export function filesRouter(fileService: FileService, userService: UserService):
 
       res.json({
         data: file,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/api/v1/files/:fileId/download", async (req, res, next) => {
+    try {
+      const actor = await requireActiveInternalUser(req, userService);
+      const download = await downloadService.createFileDownload(
+        actor,
+        req.params.fileId,
+        getAuditContext(req, actor.id),
+      );
+
+      res.json({
+        data: download,
       });
     } catch (error) {
       next(error);

@@ -16,6 +16,7 @@
     "@nimbus/contracts": "workspace:*",
     "@nimbus/db": "workspace:*",
     "@nimbus/logger": "workspace:*",
+    "@nimbus/storage": "workspace:*",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "ioredis": "^5.6.1",

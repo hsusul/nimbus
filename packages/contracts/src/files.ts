@@ -35,6 +35,8 @@ export const FileSchema = z.object({
   mimeType: z.string().nullable(),
   status: z.string(),
   sizeBytes: z.string(),
+  contentHash: z.string().nullable(),
+  currentVersionId: z.string().nullable(),
   deletedAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),

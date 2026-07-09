@@ -2,7 +2,7 @@
 
 Nimbus is an API-first object storage and file collaboration platform for developers. It is being built as an open-source backend systems project that demonstrates production-grade storage architecture: PostgreSQL metadata, S3-compatible object storage, signed URLs, BullMQ workers, resumable uploads, immutable file versions, permissions, audit logs, and observability.
 
-Current status: **M2 Metadata Core**. The repository currently contains the runnable monorepo foundation, minimal web console, Express API, worker skeleton, Prisma `User`/`Folder`/`File`/`AuditLog` models, typed config, structured logging, dev/test auth helper, Docker Compose services, folder and file metadata APIs, soft delete/restore, cursor pagination, folder cycle prevention, audit logs, and M1/M2 tests. Object storage, uploads, signed URLs, file versions, sharing, search, thumbnails, and real file byte handling are intentionally not implemented yet.
+Current status: **M3 Object Storage and Signed URLs**. The repository currently contains the runnable monorepo foundation, minimal web console, Express API, worker skeleton, Prisma `User`/`Folder`/`File`/`AuditLog`/`UploadSession`/`FileVersion` models, typed config, structured logging, dev/test auth helper, Docker Compose services, folder and file metadata APIs, soft delete/restore, cursor pagination, folder cycle prevention, audit logs, S3-compatible storage adapter, single-part signed upload flow, owner-only signed downloads, and M1-M3 tests. Multipart uploads, workers, sharing, search, thumbnails, version restore, and public links are intentionally not implemented yet.
 
 ## Architecture
 
@@ -16,14 +16,14 @@ packages/config    Typed environment validation
 packages/logger    Structured logging and redaction
 packages/auth      Auth skeleton and dev/test user helper
 packages/contracts Shared API schemas
-packages/storage   Storage package boundary for later milestones
+packages/storage   S3-compatible storage provider and object key helpers
 ```
 
 Local infrastructure is provided by Docker Compose:
 
 - PostgreSQL for metadata.
 - Redis for queues and readiness checks.
-- MinIO for future S3-compatible local object storage.
+- MinIO for S3-compatible local object storage.
 
 ## Tech Stack
 
@@ -107,6 +107,9 @@ Implemented API endpoints:
 - `POST /api/v1/files/:fileId/move`
 - `DELETE /api/v1/files/:fileId`
 - `POST /api/v1/files/:fileId/restore`
+- `POST /api/v1/uploads/start`
+- `POST /api/v1/uploads/:uploadSessionId/complete`
+- `GET /api/v1/files/:fileId/download`
 - `GET /api/v1/audit-logs`
 
 Dev/test auth for `/api/v1/me` uses headers:
@@ -122,7 +125,7 @@ Detailed product, architecture, implementation, and interview-prep notes live in
 
 ## Roadmap
 
-See the local `docs/MILESTONE_CHECKLIST.md` file. M1 and M2 are complete locally; M3 begins object storage and signed URLs, but it has not been implemented yet.
+See the local `docs/MILESTONE_CHECKLIST.md` file. M1, M2, and M3 are complete locally; M4 begins resumable multipart uploads and upload finalization work.
 
 ## License
 

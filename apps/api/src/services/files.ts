@@ -23,6 +23,8 @@ export interface FileDto {
   mimeType: string | null;
   status: string;
   sizeBytes: string;
+  contentHash: string | null;
+  currentVersionId: string | null;
   deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -107,6 +109,7 @@ export class PrismaFileService implements FileService {
       where: {
         id: fileId,
         ownerId: actor.id,
+        status: "active",
         deletedAt: null,
       },
     });
@@ -132,6 +135,7 @@ export class PrismaFileService implements FileService {
       where: {
         ownerId: actor.id,
         folderId,
+        status: "active",
         deletedAt: null,
         ...(cursorDate
           ? {
@@ -336,6 +340,8 @@ export function mapFile(file: PrismaFile): FileDto {
     mimeType: file.mimeType,
     status: file.status,
     sizeBytes: file.sizeBytes.toString(),
+    contentHash: file.contentHash,
+    currentVersionId: file.currentVersionId,
     deletedAt: file.deletedAt?.toISOString() ?? null,
     createdAt: file.createdAt.toISOString(),
     updatedAt: file.updatedAt.toISOString(),
@@ -351,6 +357,7 @@ async function getActiveFile(
     where: {
       id: fileId,
       ownerId,
+      status: "active",
       deletedAt: null,
     },
   });
@@ -394,6 +401,9 @@ async function assertFileNameAvailable(
       ownerId,
       folderId,
       normalizedName,
+      status: {
+        in: ["active", "uploading"],
+      },
       deletedAt: null,
       ...(excludeFileId
         ? {

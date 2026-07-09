@@ -1,9 +1,11 @@
 import { z } from "zod";
 
 export * from "./audit";
+export * from "./downloads";
 export * from "./files";
 export * from "./folders";
 export * from "./pagination";
+export * from "./uploads";
 
 export const ErrorEnvelopeSchema = z.object({
   error: z.object({

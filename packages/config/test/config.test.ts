@@ -12,6 +12,10 @@ describe("config validation", () => {
     expect(config.REDIS_URL).toBe("redis://localhost:6379");
     expect(config.DEV_AUTH_ENABLED).toBe(true);
     expect(config.MAX_FOLDER_DEPTH).toBe(32);
+    expect(config.MAX_FILE_SIZE_BYTES).toBe(5368709120);
+    expect(config.SIGNED_UPLOAD_URL_TTL_SECONDS).toBe(900);
+    expect(config.SIGNED_DOWNLOAD_URL_TTL_SECONDS).toBe(300);
+    expect(config.UPLOAD_SESSION_TTL_SECONDS).toBe(86400);
   });
 
   it("parses service-specific config", () => {
@@ -19,6 +23,10 @@ describe("config validation", () => {
       API_PORT: "4100",
       DEV_AUTH_ENABLED: "true",
       MAX_FOLDER_DEPTH: "24",
+      MAX_FILE_SIZE_BYTES: "1024",
+      SIGNED_UPLOAD_URL_TTL_SECONDS: "600",
+      SIGNED_DOWNLOAD_URL_TTL_SECONDS: "120",
+      UPLOAD_SESSION_TTL_SECONDS: "3600",
       DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
       REDIS_URL: "redis://localhost:6380",
     });
@@ -33,7 +41,12 @@ describe("config validation", () => {
     expect(apiConfig.port).toBe(4100);
     expect(apiConfig.devAuthEnabled).toBe(true);
     expect(apiConfig.maxFolderDepth).toBe(24);
+    expect(apiConfig.maxFileSizeBytes).toBe(1024);
+    expect(apiConfig.signedUploadUrlTtlSeconds).toBe(600);
+    expect(apiConfig.signedDownloadUrlTtlSeconds).toBe(120);
+    expect(apiConfig.uploadSessionTtlSeconds).toBe(3600);
     expect(storageConfig.bucket).toBe("bucket");
+    expect(storageConfig.signedDownloadUrlTtlSeconds).toBe(300);
   });
 
   it("rejects invalid URLs and ports", () => {
@@ -47,6 +60,14 @@ describe("config validation", () => {
     expect(() =>
       getApiConfig({
         API_PORT: "-1",
+        DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
+        REDIS_URL: "redis://localhost:6379",
+      }),
+    ).toThrow();
+
+    expect(() =>
+      getApiConfig({
+        MAX_FILE_SIZE_BYTES: "0",
         DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
         REDIS_URL: "redis://localhost:6379",
       }),

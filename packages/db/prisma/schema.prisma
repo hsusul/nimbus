@@ -23,6 +23,8 @@ model User {
   folders   Folder[]   @relation("FolderOwner")
   files     File[]     @relation("FileOwner")
   auditLogs AuditLog[] @relation("AuditActor")
+  uploadSessions UploadSession[] @relation("UploadSessionOwner")
+  createdFileVersions FileVersion[] @relation("FileVersionCreator")
 
   @@index([status])
   @@map("users")
@@ -45,6 +47,7 @@ model Folder {
   parentFolder Folder?  @relation("FolderTree", fields: [parentFolderId], references: [id], onDelete: Restrict)
   childFolders Folder[] @relation("FolderTree")
   files        File[]
+  uploadSessions UploadSession[]
 
   @@index([ownerId, parentFolderId])
   @@index([ownerId, deletedAt])
@@ -62,17 +65,83 @@ model File {
   mimeType       String?   @map("mime_type")
   status         String    @default("active")
   sizeBytes      BigInt    @default(0) @map("size_bytes")
+  contentHash    String?   @map("content_hash")
+  currentVersionId String? @map("current_version_id")
   deletedAt      DateTime? @map("deleted_at")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   owner  User   @relation("FileOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   folder Folder @relation(fields: [folderId], references: [id], onDelete: Restrict)
+  versions FileVersion[] @relation("FileVersions")
+  currentVersion FileVersion? @relation("CurrentFileVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  uploadSessions UploadSession[] @relation("UploadSessionTargetFile")
 
   @@index([ownerId, folderId])
   @@index([ownerId, deletedAt])
   @@index([folderId])
+  @@index([currentVersionId])
   @@map("files")
+}
+
+model UploadSession {
+  id               String    @id @default(cuid())
+  ownerId          String    @map("owner_id")
+  targetFolderId   String    @map("target_folder_id")
+  targetFileId     String?   @map("target_file_id")
+  plannedVersionId String    @map("planned_version_id")
+  uploadMode       String    @default("new_file") @map("upload_mode")
+  filename         String
+  mimeType         String    @map("mime_type")
+  totalSizeBytes   BigInt    @map("total_size_bytes")
+  expectedSha256   String?   @map("expected_sha256")
+  finalObjectKey   String    @map("final_object_key")
+  bucket           String
+  status           String    @default("created")
+  expiresAt        DateTime  @map("expires_at")
+  completedAt      DateTime? @map("completed_at")
+  failureReason    String?   @map("failure_reason")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  owner        User          @relation("UploadSessionOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  targetFolder Folder        @relation(fields: [targetFolderId], references: [id], onDelete: Restrict)
+  targetFile   File?         @relation("UploadSessionTargetFile", fields: [targetFileId], references: [id], onDelete: SetNull)
+  fileVersion  FileVersion?
+
+  @@index([ownerId, status])
+  @@index([targetFolderId])
+  @@index([targetFileId])
+  @@index([expiresAt])
+  @@map("upload_sessions")
+}
+
+model FileVersion {
+  id               String   @id @default(cuid())
+  fileId           String   @map("file_id")
+  versionNumber    Int      @map("version_number")
+  storageProvider  String   @map("storage_provider")
+  bucket           String
+  objectKey        String   @map("object_key")
+  sizeBytes        BigInt   @map("size_bytes")
+  sha256           String?
+  etag             String?
+  mimeType         String   @map("mime_type")
+  uploadSessionId  String   @unique @map("upload_session_id")
+  createdById      String   @map("created_by_id")
+  processingStatus String   @default("pending") @map("processing_status")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  file            File            @relation("FileVersions", fields: [fileId], references: [id], onDelete: Cascade)
+  currentForFiles File[]          @relation("CurrentFileVersion")
+  uploadSession   UploadSession   @relation(fields: [uploadSessionId], references: [id], onDelete: Restrict)
+  createdBy       User            @relation("FileVersionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([fileId, versionNumber])
+  @@index([fileId, createdAt])
+  @@index([createdById])
+  @@index([processingStatus])
+  @@map("file_versions")
 }
 
 model AuditLog {

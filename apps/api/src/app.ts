@@ -2,6 +2,7 @@ import "./types";
 
 import { getApiConfig, type ApiConfig } from "@nimbus/config";
 import { createLogger, type Logger } from "@nimbus/logger";
+import { S3CompatibleStorageProvider, type ObjectStorageProvider } from "@nimbus/storage";
 import cors from "cors";
 import express from "express";
 
@@ -14,10 +15,13 @@ import { foldersRouter } from "./routes/folders";
 import { healthRouter } from "./routes/health";
 import { meRouter } from "./routes/me";
 import { readyRouter } from "./routes/ready";
+import { uploadsRouter } from "./routes/uploads";
 import { PrismaAuditLogService, type AuditLogService } from "./services/audit-log";
+import { PrismaDownloadService, type DownloadService } from "./services/downloads";
 import { PrismaFileService, type FileService } from "./services/files";
 import { PrismaFolderService, type FolderService } from "./services/folders";
 import { createReadinessChecker, type ReadinessChecker } from "./services/readiness";
+import { PrismaUploadService, type UploadService } from "./services/uploads";
 import { PrismaUserService, type UserService } from "./services/users";
 
 export interface AppDependencies {
@@ -28,6 +32,9 @@ export interface AppDependencies {
   folderService?: FolderService;
   fileService?: FileService;
   auditLogService?: AuditLogService;
+  storageProvider?: ObjectStorageProvider;
+  uploadService?: UploadService;
+  downloadService?: DownloadService;
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
@@ -44,6 +51,27 @@ export function createApp(dependencies: AppDependencies = {}) {
     dependencies.folderService ?? new PrismaFolderService(undefined, config.maxFolderDepth);
   const fileService = dependencies.fileService ?? new PrismaFileService();
   const auditLogService = dependencies.auditLogService ?? new PrismaAuditLogService();
+  const storageProvider =
+    dependencies.storageProvider ??
+    new S3CompatibleStorageProvider({
+      endpoint: config.storage.endpoint,
+      region: config.storage.region,
+      accessKey: config.storage.accessKey,
+      secretKey: config.storage.secretKey,
+    });
+  const uploadService =
+    dependencies.uploadService ??
+    new PrismaUploadService(storageProvider, {
+      bucket: config.storage.bucket,
+      maxFileSizeBytes: config.maxFileSizeBytes,
+      signedUploadUrlTtlSeconds: config.signedUploadUrlTtlSeconds,
+      uploadSessionTtlSeconds: config.uploadSessionTtlSeconds,
+    });
+  const downloadService =
+    dependencies.downloadService ??
+    new PrismaDownloadService(storageProvider, {
+      signedDownloadUrlTtlSeconds: config.signedDownloadUrlTtlSeconds,
+    });
   const app = express();
 
   app.disable("x-powered-by");
@@ -67,7 +95,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use(readyRouter(readinessChecker));
   app.use(meRouter(userService));
   app.use(foldersRouter(folderService, userService));
-  app.use(filesRouter(fileService, userService));
+  app.use(uploadsRouter(uploadService, userService));
+  app.use(filesRouter(fileService, userService, downloadService));
   app.use(auditLogsRouter(auditLogService, userService));
   app.use(notFoundHandler);
   app.use(errorHandler);

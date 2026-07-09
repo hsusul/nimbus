@@ -14,8 +14,21 @@ const testConfig: ApiConfig = {
   authMode: "dev",
   devAuthEnabled: true,
   maxFolderDepth: 32,
+  maxFileSizeBytes: 5368709120,
+  signedUploadUrlTtlSeconds: 900,
+  signedDownloadUrlTtlSeconds: 300,
+  uploadSessionTtlSeconds: 86400,
   databaseUrl: "postgresql://nimbus:nimbus@localhost:5432/nimbus?schema=public",
   redisUrl: "redis://localhost:6379",
+  storage: {
+    endpoint: "http://localhost:9000",
+    accessKey: "nimbus",
+    secretKey: "nimbus-secret",
+    bucket: "nimbus-local",
+    region: "us-east-1",
+    signedUploadUrlTtlSeconds: 900,
+    signedDownloadUrlTtlSeconds: 300,
+  },
 };
 
 const userService: UserService = {

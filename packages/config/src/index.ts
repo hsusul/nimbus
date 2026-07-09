@@ -37,6 +37,14 @@ const storageEnvSchema = z.object({
   MINIO_SECRET_KEY: z.string().min(1).optional().default("nimbus-secret"),
   MINIO_BUCKET: z.string().min(1).optional().default("nimbus-local"),
   MINIO_REGION: z.string().min(1).optional().default("us-east-1"),
+  SIGNED_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).optional().default(900),
+  SIGNED_DOWNLOAD_URL_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(3600)
+    .optional()
+    .default(300),
 });
 
 const apiEnvSchema = z.object({
@@ -46,6 +54,20 @@ const apiEnvSchema = z.object({
   AUTH_MODE: z.enum(["dev", "authjs"]).optional().default("dev"),
   DEV_AUTH_ENABLED: booleanFromEnv(true),
   MAX_FOLDER_DEPTH: z.coerce.number().int().positive().max(128).optional().default(32),
+  MAX_FILE_SIZE_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional()
+    .default(5368709120),
+  UPLOAD_SESSION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(300)
+    .max(604800)
+    .optional()
+    .default(86400),
 });
 
 const webEnvSchema = z.object({
@@ -84,8 +106,13 @@ export function getApiConfig(env: NodeJS.ProcessEnv = process.env) {
     authMode: config.AUTH_MODE,
     devAuthEnabled: config.DEV_AUTH_ENABLED,
     maxFolderDepth: config.MAX_FOLDER_DEPTH,
+    maxFileSizeBytes: config.MAX_FILE_SIZE_BYTES,
+    signedUploadUrlTtlSeconds: config.SIGNED_UPLOAD_URL_TTL_SECONDS,
+    signedDownloadUrlTtlSeconds: config.SIGNED_DOWNLOAD_URL_TTL_SECONDS,
+    uploadSessionTtlSeconds: config.UPLOAD_SESSION_TTL_SECONDS,
     databaseUrl: config.DATABASE_URL,
     redisUrl: config.REDIS_URL,
+    storage: getStorageConfig(env),
   };
 }
 
@@ -135,5 +162,7 @@ export function getStorageConfig(env: NodeJS.ProcessEnv = process.env) {
     secretKey: config.MINIO_SECRET_KEY,
     bucket: config.MINIO_BUCKET,
     region: config.MINIO_REGION,
+    signedUploadUrlTtlSeconds: config.SIGNED_UPLOAD_URL_TTL_SECONDS,
+    signedDownloadUrlTtlSeconds: config.SIGNED_DOWNLOAD_URL_TTL_SECONDS,
   };
 }

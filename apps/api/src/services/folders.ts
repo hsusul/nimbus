@@ -200,6 +200,7 @@ export class PrismaFolderService implements FolderService {
         where: {
           ownerId: actor.id,
           folderId,
+          status: "active",
           deletedAt: null,
           ...cursorWhere,
         },
