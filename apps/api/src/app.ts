@@ -20,6 +20,7 @@ import { PrismaAuditLogService, type AuditLogService } from "./services/audit-lo
 import { PrismaDownloadService, type DownloadService } from "./services/downloads";
 import { PrismaFileService, type FileService } from "./services/files";
 import { PrismaFolderService, type FolderService } from "./services/folders";
+import { BullMqUploadFinalizationQueue, type UploadFinalizationQueue } from "./services/queue";
 import { createReadinessChecker, type ReadinessChecker } from "./services/readiness";
 import { PrismaUploadService, type UploadService } from "./services/uploads";
 import { PrismaUserService, type UserService } from "./services/users";
@@ -33,6 +34,7 @@ export interface AppDependencies {
   fileService?: FileService;
   auditLogService?: AuditLogService;
   storageProvider?: ObjectStorageProvider;
+  uploadFinalizationQueue?: UploadFinalizationQueue;
   uploadService?: UploadService;
   downloadService?: DownloadService;
 }
@@ -59,9 +61,11 @@ export function createApp(dependencies: AppDependencies = {}) {
       accessKey: config.storage.accessKey,
       secretKey: config.storage.secretKey,
     });
+  const uploadFinalizationQueue =
+    dependencies.uploadFinalizationQueue ?? new BullMqUploadFinalizationQueue(config.redisUrl);
   const uploadService =
     dependencies.uploadService ??
-    new PrismaUploadService(storageProvider, {
+    new PrismaUploadService(storageProvider, uploadFinalizationQueue, {
       bucket: config.storage.bucket,
       maxFileSizeBytes: config.maxFileSizeBytes,
       signedUploadUrlTtlSeconds: config.signedUploadUrlTtlSeconds,

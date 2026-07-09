@@ -98,6 +98,7 @@ model UploadSession {
   finalObjectKey   String    @map("final_object_key")
   bucket           String
   status           String    @default("created")
+  correlationId    String?   @map("correlation_id")
   expiresAt        DateTime  @map("expires_at")
   completedAt      DateTime? @map("completed_at")
   failureReason    String?   @map("failure_reason")
@@ -108,12 +109,38 @@ model UploadSession {
   targetFolder Folder        @relation(fields: [targetFolderId], references: [id], onDelete: Restrict)
   targetFile   File?         @relation("UploadSessionTargetFile", fields: [targetFileId], references: [id], onDelete: SetNull)
   fileVersion  FileVersion?
+  backgroundJobs BackgroundJob[]
 
   @@index([ownerId, status])
   @@index([targetFolderId])
   @@index([targetFileId])
   @@index([expiresAt])
+  @@index([correlationId])
   @@map("upload_sessions")
+}
+
+model BackgroundJob {
+  id            String    @id @default(cuid())
+  queueName     String    @map("queue_name")
+  bullmqJobId   String?   @map("bullmq_job_id")
+  resourceType  String    @map("resource_type")
+  resourceId    String    @map("resource_id")
+  status        String    @default("queued")
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(3) @map("max_attempts")
+  lastError     String?   @map("last_error")
+  correlationId String?   @map("correlation_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  completedAt   DateTime? @map("completed_at")
+
+  uploadSession UploadSession? @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@index([queueName, status])
+  @@index([resourceType, resourceId])
+  @@index([correlationId])
+  @@index([createdAt])
+  @@map("background_jobs")
 }
 
 model FileVersion {

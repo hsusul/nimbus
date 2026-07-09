@@ -1,7 +1,8 @@
+import { UPLOAD_FINALIZATION_QUEUE_NAME } from "@nimbus/contracts";
 import { Queue, type ConnectionOptions } from "bullmq";
 import IORedis from "ioredis";
 
-export const registeredQueues = [] as const;
+export const registeredQueues = [UPLOAD_FINALIZATION_QUEUE_NAME] as const;
 
 export type RegisteredQueueName = (typeof registeredQueues)[number];
 

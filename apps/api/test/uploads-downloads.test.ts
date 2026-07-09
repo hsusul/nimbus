@@ -14,6 +14,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../src/app";
+import type { UploadFinalizationQueue } from "../src/services/queue";
 
 class FakeObjectStorageProvider implements ObjectStorageProvider {
   private readonly objects = new Map<string, ObjectMetadata & { body: string }>();
@@ -59,6 +60,26 @@ class FakeObjectStorageProvider implements ObjectStorageProvider {
   }
 }
 
+class FakeUploadFinalizationQueue implements UploadFinalizationQueue {
+  readonly jobs: Array<{
+    uploadSessionId: string;
+    backgroundJobId: string;
+    correlationId?: string | null;
+  }> = [];
+
+  async enqueueUploadFinalization(input: {
+    uploadSessionId: string;
+    backgroundJobId: string;
+    correlationId?: string | null;
+  }): Promise<{ bullmqJobId: string }> {
+    this.jobs.push(input);
+
+    return {
+      bullmqJobId: `bull-${input.backgroundJobId}`,
+    };
+  }
+}
+
 const testConfig: ApiConfig = {
   nodeEnv: "test",
   logLevel: "error",
@@ -88,10 +109,12 @@ const testConfig: ApiConfig = {
 const runId = `m3-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const prisma = getPrismaClient();
 const storage = new FakeObjectStorageProvider();
+const uploadFinalizationQueue = new FakeUploadFinalizationQueue();
 const app = createApp({
   config: testConfig,
   readinessChecker: async () => ({ postgres: true, redis: true }),
   storageProvider: storage,
+  uploadFinalizationQueue,
 });
 
 function authHeaders(userSlug: string) {
@@ -150,6 +173,16 @@ async function cleanupRunData() {
     where: {
       createdById: {
         in: userIds,
+      },
+    },
+  });
+  await prisma.backgroundJob.deleteMany({
+    where: {
+      resourceType: "upload_session",
+      uploadSession: {
+        ownerId: {
+          in: userIds,
+        },
       },
     },
   });
@@ -218,10 +251,11 @@ describe.sequential("single-part uploads and signed downloads", () => {
     expect(uploadSession.finalObjectKey).not.toContain("Private Report.txt");
   });
 
-  it("fails completion when the object is missing", async () => {
-    const userSlug = "missing";
-    const filename = "Missing Object.txt";
+  it("enqueues completion and returns completing without finalizing synchronously", async () => {
+    const userSlug = "enqueue";
+    const filename = "Queued Object.txt";
     const rootFolderId = await ensureRootFolder(userSlug);
+    const queueLengthBefore = uploadFinalizationQueue.jobs.length;
     const response = await request(app)
       .post("/api/v1/uploads/start")
       .set(authHeaders(userSlug))
@@ -236,18 +270,43 @@ describe.sequential("single-part uploads and signed downloads", () => {
     const completion = await request(app)
       .post(`/api/v1/uploads/${response.body.data.uploadSessionId}/complete`)
       .set(authHeaders(userSlug))
-      .expect(409);
+      .expect(200);
 
-    expect(completion.body.error.code).toBe("object_missing");
+    expect(completion.body.data).toMatchObject({
+      uploadSessionId: response.body.data.uploadSessionId,
+      status: "completing",
+      fileId: response.body.data.fileId,
+      backgroundJobId: expect.any(String),
+      correlationId: expect.any(String),
+    });
+    expect(uploadFinalizationQueue.jobs).toHaveLength(queueLengthBefore + 1);
 
     const uploadSession = await prisma.uploadSession.findUniqueOrThrow({
       where: {
         id: response.body.data.uploadSessionId,
       },
     });
+    const backgroundJob = await prisma.backgroundJob.findUniqueOrThrow({
+      where: {
+        id: completion.body.data.backgroundJobId,
+      },
+    });
+    const fileVersionCount = await prisma.fileVersion.count({
+      where: {
+        uploadSessionId: uploadSession.id,
+      },
+    });
 
-    expect(uploadSession.status).toBe("failed");
-    expect(uploadSession.failureReason).toBe("object_missing");
+    expect(uploadSession.status).toBe("completing");
+    expect(uploadSession.correlationId).toBe(completion.body.data.correlationId);
+    expect(backgroundJob).toMatchObject({
+      status: "queued",
+      resourceType: "upload_session",
+      resourceId: uploadSession.id,
+      correlationId: completion.body.data.correlationId,
+    });
+    expect(backgroundJob.bullmqJobId).toBe(`bull-${backgroundJob.id}`);
+    expect(fileVersionCount).toBe(0);
 
     const children = await request(app)
       .get(`/api/v1/folders/${rootFolderId}/children`)
@@ -257,17 +316,6 @@ describe.sequential("single-part uploads and signed downloads", () => {
     expect(children.body.data.children.map((child: { id: string }) => child.id)).not.toContain(
       response.body.data.fileId,
     );
-
-    await request(app)
-      .post("/api/v1/uploads/start")
-      .set(authHeaders(userSlug))
-      .send({
-        folderId: rootFolderId,
-        filename,
-        mimeType: "text/plain",
-        totalSizeBytes: "5",
-      })
-      .expect(201);
   });
 
   it("does not let terminal upload placeholders reserve filenames", async () => {
@@ -338,7 +386,7 @@ describe.sequential("single-part uploads and signed downloads", () => {
       .expect(201);
   });
 
-  it("completes an upload after the object exists without storing bytes in Postgres", async () => {
+  it("does not enqueue duplicate destructive finalization for duplicate completion", async () => {
     const response = await startUpload("complete", "Complete Object.txt");
     const uploadSession = await prisma.uploadSession.findUniqueOrThrow({
       where: {
@@ -354,44 +402,45 @@ describe.sequential("single-part uploads and signed downloads", () => {
       body: "hello-secret-bytes",
     });
 
+    const queueLengthBefore = uploadFinalizationQueue.jobs.length;
     const completion = await request(app)
       .post(`/api/v1/uploads/${uploadSession.id}/complete`)
       .set(authHeaders("complete"))
       .expect(200);
 
-    expect(completion.body.data.file).toMatchObject({
-      id: response.body.data.fileId,
-      status: "active",
-      currentVersionId: uploadSession.plannedVersionId,
-      sizeBytes: uploadSession.totalSizeBytes.toString(),
+    expect(completion.body.data).toMatchObject({
+      uploadSessionId: uploadSession.id,
+      status: "completing",
+      fileId: response.body.data.fileId,
+      backgroundJobId: expect.any(String),
     });
-
-    const fileVersion = await prisma.fileVersion.findUniqueOrThrow({
-      where: {
-        uploadSessionId: uploadSession.id,
-      },
-    });
-    const persistedMetadata = JSON.stringify(
-      { fileVersion, file: completion.body.data.file, uploadSession },
-      (_key, value: unknown) => (typeof value === "bigint" ? value.toString() : value),
-    );
-
-    expect(fileVersion.processingStatus).toBe("available");
-    expect(fileVersion.objectKey).toBe(uploadSession.finalObjectKey);
-    expect(persistedMetadata).not.toContain("hello-secret-bytes");
 
     await request(app)
       .post(`/api/v1/uploads/${uploadSession.id}/complete`)
       .set(authHeaders("complete"))
-      .expect(409);
+      .expect(200)
+      .expect((duplicate) => {
+        expect(duplicate.body.data).toMatchObject({
+          uploadSessionId: uploadSession.id,
+          status: "completing",
+          fileId: response.body.data.fileId,
+          backgroundJobId: completion.body.data.backgroundJobId,
+        });
+      });
 
     const fileVersionCount = await prisma.fileVersion.count({
       where: {
         uploadSessionId: uploadSession.id,
       },
     });
+    const persistedMetadata = JSON.stringify(
+      { completion: completion.body.data, uploadSession },
+      (_key, value: unknown) => (typeof value === "bigint" ? value.toString() : value),
+    );
 
-    expect(fileVersionCount).toBe(1);
+    expect(fileVersionCount).toBe(0);
+    expect(uploadFinalizationQueue.jobs).toHaveLength(queueLengthBefore + 1);
+    expect(persistedMetadata).not.toContain("hello-secret-bytes");
   });
 
   it("prevents another user from completing an upload session", async () => {
@@ -420,10 +469,7 @@ describe.sequential("single-part uploads and signed downloads", () => {
       body: "download",
     });
 
-    await request(app)
-      .post(`/api/v1/uploads/${uploadSession.id}/complete`)
-      .set(authHeaders("download"))
-      .expect(200);
+    await markUploadCompleted(uploadSession.id);
 
     const download = await request(app)
       .get(`/api/v1/files/${response.body.data.fileId}/download`)
@@ -456,6 +502,68 @@ describe.sequential("single-part uploads and signed downloads", () => {
     expect(JSON.stringify(auditResponse.body)).not.toContain(download.body.data.url);
   });
 });
+
+async function markUploadCompleted(uploadSessionId: string) {
+  const uploadSession = await prisma.uploadSession.findUniqueOrThrow({
+    where: {
+      id: uploadSessionId,
+    },
+  });
+
+  if (!uploadSession.targetFileId) {
+    throw new Error("Upload session is missing a target file.");
+  }
+
+  const fileVersion = await prisma.fileVersion.create({
+    data: {
+      id: uploadSession.plannedVersionId,
+      fileId: uploadSession.targetFileId,
+      versionNumber: 1,
+      storageProvider: "s3-compatible",
+      bucket: uploadSession.bucket,
+      objectKey: uploadSession.finalObjectKey,
+      sizeBytes: uploadSession.totalSizeBytes,
+      mimeType: uploadSession.mimeType,
+      uploadSessionId: uploadSession.id,
+      createdById: uploadSession.ownerId,
+      processingStatus: "available",
+    },
+  });
+  const file = await prisma.file.update({
+    where: {
+      id: uploadSession.targetFileId,
+    },
+    data: {
+      status: "active",
+      currentVersionId: fileVersion.id,
+      sizeBytes: fileVersion.sizeBytes,
+      mimeType: fileVersion.mimeType,
+    },
+  });
+
+  await prisma.uploadSession.update({
+    where: {
+      id: uploadSession.id,
+    },
+    data: {
+      status: "completed",
+      completedAt: new Date(),
+    },
+  });
+  await prisma.auditLog.create({
+    data: {
+      actorUserId: uploadSession.ownerId,
+      action: "upload.completed",
+      resourceType: "file",
+      resourceId: file.id,
+      correlationId: uploadSession.correlationId,
+      metadataJson: {
+        uploadSessionId: uploadSession.id,
+        fileVersionId: fileVersion.id,
+      },
+    },
+  });
+}
 
 function toObjectMapKey(input: ObjectLocation): string {
   return `${input.bucket}/${input.objectKey}`;

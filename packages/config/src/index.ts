@@ -124,6 +124,7 @@ export function getWorkerConfig(env: NodeJS.ProcessEnv = process.env) {
     logLevel: config.LOG_LEVEL,
     databaseUrl: config.DATABASE_URL,
     redisUrl: config.REDIS_URL,
+    storage: getStorageConfig(env),
   };
 }
 

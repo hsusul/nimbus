@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-import { FileSchema } from "./files";
-
 export const UploadSessionStatusSchema = z.enum([
   "created",
   "uploading",
@@ -40,7 +38,11 @@ export const UploadStartResponseSchema = z.object({
 
 export const UploadCompleteResponseSchema = z.object({
   data: z.object({
-    file: FileSchema,
+    uploadSessionId: z.string(),
+    status: z.enum(["completing", "completed"]),
+    fileId: z.string(),
+    backgroundJobId: z.string().nullable(),
+    correlationId: z.string(),
   }),
 });
 

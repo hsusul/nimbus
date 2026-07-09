@@ -48,7 +48,11 @@ export class S3CompatibleStorageProvider implements ObjectStorageProvider {
       Key: input.objectKey,
       ContentType: input.contentType,
       ContentLength: input.contentLength ? Number(input.contentLength) : undefined,
-      ChecksumSHA256: input.checksumSha256,
+      Metadata: input.checksumSha256
+        ? {
+            sha256: input.checksumSha256,
+          }
+        : undefined,
     });
 
     return sign(command, this.client, input.expiresInSeconds);

@@ -52,6 +52,9 @@ importers:
       "@nimbus/storage":
         specifier: workspace:*
         version: link:../../packages/storage
+      bullmq:
+        specifier: ^5.56.0
+        version: 5.79.3
       cors:
         specifier: ^2.8.5
         version: 2.8.6
@@ -117,9 +120,18 @@ importers:
       "@nimbus/config":
         specifier: workspace:*
         version: link:../../packages/config
+      "@nimbus/contracts":
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      "@nimbus/db":
+        specifier: workspace:*
+        version: link:../../packages/db
       "@nimbus/logger":
         specifier: workspace:*
         version: link:../../packages/logger
+      "@nimbus/storage":
+        specifier: workspace:*
+        version: link:../../packages/storage
       bullmq:
         specifier: ^5.56.0
         version: 5.79.3

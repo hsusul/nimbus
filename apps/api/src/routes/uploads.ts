@@ -30,16 +30,14 @@ export function uploadsRouter(uploadService: UploadService, userService: UserSer
   router.post("/api/v1/uploads/:uploadSessionId/complete", async (req, res, next) => {
     try {
       const actor = await requireActiveInternalUser(req, userService);
-      const file = await uploadService.completeSinglePartUpload(
+      const completion = await uploadService.completeSinglePartUpload(
         actor,
         req.params.uploadSessionId,
         getAuditContext(req, actor.id),
       );
 
       res.json({
-        data: {
-          file,
-        },
+        data: completion,
       });
     } catch (error) {
       next(error);
