@@ -1,0 +1,31 @@
+{
+  "name": "nimbus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "dev:api": "pnpm --filter @nimbus/api dev",
+    "dev:web": "pnpm --filter @nimbus/web dev",
+    "dev:worker": "pnpm --filter @nimbus/worker dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:generate": "pnpm --filter @nimbus/db db:generate",
+    "db:migrate": "DATABASE_URL=${DATABASE_URL:-postgresql://nimbus:nimbus@localhost:5432/nimbus?schema=public} pnpm --filter @nimbus/db db:migrate",
+    "db:deploy": "DATABASE_URL=${DATABASE_URL:-postgresql://nimbus:nimbus@localhost:5432/nimbus?schema=public} pnpm --filter @nimbus/db db:deploy"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.32.0",
+    "@types/node": "^24.0.14",
+    "eslint": "^9.32.0",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.36.0",
+    "vitest": "^3.2.4"
+  }
+}
