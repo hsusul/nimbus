@@ -23,6 +23,7 @@ export function meRouter(userService: UserService): Router {
           email: user.email,
           displayName: user.displayName,
           status: user.status,
+          rootFolderId: user.rootFolderId,
           storage: {
             quotaBytes: user.storageQuotaBytes.toString(),
             usedBytes: user.storageUsedBytes.toString(),

@@ -11,12 +11,14 @@ describe("config validation", () => {
     );
     expect(config.REDIS_URL).toBe("redis://localhost:6379");
     expect(config.DEV_AUTH_ENABLED).toBe(true);
+    expect(config.MAX_FOLDER_DEPTH).toBe(32);
   });
 
   it("parses service-specific config", () => {
     const apiConfig = getApiConfig({
       API_PORT: "4100",
       DEV_AUTH_ENABLED: "true",
+      MAX_FOLDER_DEPTH: "24",
       DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
       REDIS_URL: "redis://localhost:6380",
     });
@@ -30,6 +32,7 @@ describe("config validation", () => {
 
     expect(apiConfig.port).toBe(4100);
     expect(apiConfig.devAuthEnabled).toBe(true);
+    expect(apiConfig.maxFolderDepth).toBe(24);
     expect(storageConfig.bucket).toBe("bucket");
   });
 

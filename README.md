@@ -2,7 +2,7 @@
 
 Nimbus is an API-first object storage and file collaboration platform for developers. It is being built as an open-source backend systems project that demonstrates production-grade storage architecture: PostgreSQL metadata, S3-compatible object storage, signed URLs, BullMQ workers, resumable uploads, immutable file versions, permissions, audit logs, and observability.
 
-Current status: **M1 Foundation**. The repository currently contains the runnable monorepo foundation, minimal web console, Express API skeleton, worker skeleton, Prisma `User` model, typed config, structured logging, dev/test auth helper, Docker Compose services, and M1 tests. Product features such as folders, files, uploads, sharing, search, and versioning are intentionally not implemented yet.
+Current status: **M2 Metadata Core**. The repository currently contains the runnable monorepo foundation, minimal web console, Express API, worker skeleton, Prisma `User`/`Folder`/`File`/`AuditLog` models, typed config, structured logging, dev/test auth helper, Docker Compose services, folder and file metadata APIs, soft delete/restore, cursor pagination, folder cycle prevention, audit logs, and M1/M2 tests. Object storage, uploads, signed URLs, file versions, sharing, search, thumbnails, and real file byte handling are intentionally not implemented yet.
 
 ## Architecture
 
@@ -88,11 +88,26 @@ pnpm dev:web
 pnpm dev:worker
 ```
 
-M1 API endpoints:
+Implemented API endpoints:
 
 - `GET /health`
 - `GET /ready`
 - `GET /api/v1/me`
+- `POST /api/v1/folders`
+- `GET /api/v1/folders/:folderId`
+- `GET /api/v1/folders/:folderId/children`
+- `PATCH /api/v1/folders/:folderId`
+- `POST /api/v1/folders/:folderId/move`
+- `DELETE /api/v1/folders/:folderId`
+- `POST /api/v1/folders/:folderId/restore`
+- `GET /api/v1/files`
+- `GET /api/v1/files/:fileId`
+- `POST /api/v1/files`
+- `PATCH /api/v1/files/:fileId`
+- `POST /api/v1/files/:fileId/move`
+- `DELETE /api/v1/files/:fileId`
+- `POST /api/v1/files/:fileId/restore`
+- `GET /api/v1/audit-logs`
 
 Dev/test auth for `/api/v1/me` uses headers:
 
@@ -103,15 +118,11 @@ x-nimbus-dev-email: test@example.com
 
 ## Documentation
 
-- Product requirements: [docs/PRD.md](docs/PRD.md)
-- Milestone roadmap: [docs/MILESTONE_CHECKLIST.md](docs/MILESTONE_CHECKLIST.md)
-- Implementation log: [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md)
-- Code map: [docs/CODEMAP.md](docs/CODEMAP.md)
-- Rebuild guide: [docs/BUILD_FROM_SCRATCH.md](docs/BUILD_FROM_SCRATCH.md)
+Detailed product, architecture, implementation, and interview-prep notes live in the local `docs/` directory. That directory is intentionally ignored for the public GitHub repo.
 
 ## Roadmap
 
-See [docs/MILESTONE_CHECKLIST.md](docs/MILESTONE_CHECKLIST.md). M1 is the foundation milestone. M2 begins folders and metadata, but it has not been implemented yet.
+See the local `docs/MILESTONE_CHECKLIST.md` file. M1 and M2 are complete locally; M3 begins object storage and signed URLs, but it has not been implemented yet.
 
 ## License
 

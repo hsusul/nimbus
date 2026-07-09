@@ -56,4 +56,4 @@ export function createLogger(options: LoggerOptions): Logger {
   };
 }
 
-export { redact, redactString } from "./redaction";
+export { redact, redactString, type Redactable } from "./redaction";

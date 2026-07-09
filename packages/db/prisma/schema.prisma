@@ -20,6 +20,79 @@ model User {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
+  folders   Folder[]   @relation("FolderOwner")
+  files     File[]     @relation("FileOwner")
+  auditLogs AuditLog[] @relation("AuditActor")
+
   @@index([status])
   @@map("users")
+}
+
+model Folder {
+  id              String    @id @default(cuid())
+  ownerId         String    @map("owner_id")
+  parentFolderId  String?   @map("parent_folder_id")
+  name            String
+  normalizedName  String    @map("normalized_name")
+  pathCache       String?   @map("path_cache")
+  depth           Int       @default(0)
+  status          String    @default("active")
+  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  owner        User     @relation("FolderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  parentFolder Folder?  @relation("FolderTree", fields: [parentFolderId], references: [id], onDelete: Restrict)
+  childFolders Folder[] @relation("FolderTree")
+  files        File[]
+
+  @@index([ownerId, parentFolderId])
+  @@index([ownerId, deletedAt])
+  @@index([parentFolderId])
+  @@map("folders")
+}
+
+model File {
+  id             String    @id @default(cuid())
+  ownerId        String    @map("owner_id")
+  folderId       String    @map("folder_id")
+  name           String
+  normalizedName String    @map("normalized_name")
+  extension      String?
+  mimeType       String?   @map("mime_type")
+  status         String    @default("active")
+  sizeBytes      BigInt    @default(0) @map("size_bytes")
+  deletedAt      DateTime? @map("deleted_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  owner  User   @relation("FileOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  folder Folder @relation(fields: [folderId], references: [id], onDelete: Restrict)
+
+  @@index([ownerId, folderId])
+  @@index([ownerId, deletedAt])
+  @@index([folderId])
+  @@map("files")
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  actorUserId   String   @map("actor_user_id")
+  action        String
+  resourceType  String   @map("resource_type")
+  resourceId    String   @map("resource_id")
+  targetUserId  String?  @map("target_user_id")
+  requestId     String?  @map("request_id")
+  correlationId String?  @map("correlation_id")
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  metadataJson  Json?    @map("metadata_json")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  actor User @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([actorUserId, createdAt])
+  @@index([resourceType, resourceId, createdAt])
+  @@index([requestId])
+  @@map("audit_logs")
 }

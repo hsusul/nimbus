@@ -13,6 +13,7 @@ const testConfig: ApiConfig = {
   corsOrigin: "http://localhost:3000",
   authMode: "dev",
   devAuthEnabled: true,
+  maxFolderDepth: 32,
   databaseUrl: "postgresql://nimbus:nimbus@localhost:5432/nimbus?schema=public",
   redisUrl: "redis://localhost:6379",
 };
@@ -26,6 +27,7 @@ const userService: UserService = {
       status: "active",
       storageQuotaBytes: 5368709120n,
       storageUsedBytes: 0n,
+      rootFolderId: "fld_root",
     };
   },
 };
@@ -91,6 +93,7 @@ describe("api foundation routes", () => {
       email: "test@example.com",
       displayName: "Test User",
       status: "active",
+      rootFolderId: "fld_root",
     });
   });
 

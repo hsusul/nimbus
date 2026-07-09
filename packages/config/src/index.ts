@@ -45,6 +45,7 @@ const apiEnvSchema = z.object({
   CORS_ORIGIN: z.string().url().optional().default("http://localhost:3000"),
   AUTH_MODE: z.enum(["dev", "authjs"]).optional().default("dev"),
   DEV_AUTH_ENABLED: booleanFromEnv(true),
+  MAX_FOLDER_DEPTH: z.coerce.number().int().positive().max(128).optional().default(32),
 });
 
 const webEnvSchema = z.object({
@@ -82,6 +83,7 @@ export function getApiConfig(env: NodeJS.ProcessEnv = process.env) {
     corsOrigin: config.CORS_ORIGIN,
     authMode: config.AUTH_MODE,
     devAuthEnabled: config.DEV_AUTH_ENABLED,
+    maxFolderDepth: config.MAX_FOLDER_DEPTH,
     databaseUrl: config.DATABASE_URL,
     redisUrl: config.REDIS_URL,
   };

@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+export * from "./audit";
+export * from "./files";
+export * from "./folders";
+export * from "./pagination";
+
 export const ErrorEnvelopeSchema = z.object({
   error: z.object({
     code: z.string(),
@@ -37,6 +42,7 @@ export const MeResponseSchema = z.object({
     email: z.string().email(),
     displayName: z.string(),
     status: z.string(),
+    rootFolderId: z.string(),
     storage: z.object({
       quotaBytes: z.string(),
       usedBytes: z.string(),
