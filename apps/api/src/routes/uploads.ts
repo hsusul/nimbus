@@ -1,4 +1,4 @@
-import { UploadStartRequestSchema } from "@nimbus/contracts";
+import { RegisterUploadChunkRequestSchema, UploadStartRequestSchema } from "@nimbus/contracts";
 import type { Router } from "express";
 import { Router as createRouter } from "express";
 
@@ -13,11 +13,7 @@ export function uploadsRouter(uploadService: UploadService, userService: UserSer
     try {
       const actor = await requireActiveInternalUser(req, userService);
       const input = UploadStartRequestSchema.parse(req.body);
-      const upload = await uploadService.startSinglePartUpload(
-        actor,
-        input,
-        getAuditContext(req, actor.id),
-      );
+      const upload = await uploadService.startUpload(actor, input, getAuditContext(req, actor.id));
 
       res.status(201).json({
         data: upload,
@@ -27,10 +23,54 @@ export function uploadsRouter(uploadService: UploadService, userService: UserSer
     }
   });
 
+  router.get("/api/v1/uploads/:uploadSessionId", async (req, res, next) => {
+    try {
+      const actor = await requireActiveInternalUser(req, userService);
+      const upload = await uploadService.getUploadSessionDetail(actor, req.params.uploadSessionId);
+
+      res.json({
+        data: upload,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/api/v1/uploads/:uploadSessionId/chunks", async (req, res, next) => {
+    try {
+      const actor = await requireActiveInternalUser(req, userService);
+      const chunks = await uploadService.getUploadChunks(actor, req.params.uploadSessionId);
+
+      res.json({
+        data: chunks,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/api/v1/uploads/:uploadSessionId/chunks", async (req, res, next) => {
+    try {
+      const actor = await requireActiveInternalUser(req, userService);
+      const input = RegisterUploadChunkRequestSchema.parse(req.body);
+      const chunk = await uploadService.registerUploadChunk(
+        actor,
+        req.params.uploadSessionId,
+        input,
+      );
+
+      res.status(201).json({
+        data: chunk,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post("/api/v1/uploads/:uploadSessionId/complete", async (req, res, next) => {
     try {
       const actor = await requireActiveInternalUser(req, userService);
-      const completion = await uploadService.completeSinglePartUpload(
+      const completion = await uploadService.completeUpload(
         actor,
         req.params.uploadSessionId,
         getAuditContext(req, actor.id),
@@ -38,6 +78,23 @@ export function uploadsRouter(uploadService: UploadService, userService: UserSer
 
       res.json({
         data: completion,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/api/v1/uploads/:uploadSessionId/cancel", async (req, res, next) => {
+    try {
+      const actor = await requireActiveInternalUser(req, userService);
+      const cancellation = await uploadService.cancelUpload(
+        actor,
+        req.params.uploadSessionId,
+        getAuditContext(req, actor.id),
+      );
+
+      res.json({
+        data: cancellation,
       });
     } catch (error) {
       next(error);

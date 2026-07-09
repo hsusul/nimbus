@@ -16,6 +16,8 @@ describe("config validation", () => {
     expect(config.SIGNED_UPLOAD_URL_TTL_SECONDS).toBe(900);
     expect(config.SIGNED_DOWNLOAD_URL_TTL_SECONDS).toBe(300);
     expect(config.UPLOAD_SESSION_TTL_SECONDS).toBe(86400);
+    expect(config.MULTIPART_UPLOAD_THRESHOLD_BYTES).toBe(67108864);
+    expect(config.MULTIPART_CHUNK_SIZE_BYTES).toBe(8388608);
   });
 
   it("parses service-specific config", () => {
@@ -27,6 +29,8 @@ describe("config validation", () => {
       SIGNED_UPLOAD_URL_TTL_SECONDS: "600",
       SIGNED_DOWNLOAD_URL_TTL_SECONDS: "120",
       UPLOAD_SESSION_TTL_SECONDS: "3600",
+      MULTIPART_UPLOAD_THRESHOLD_BYTES: "10485760",
+      MULTIPART_CHUNK_SIZE_BYTES: "5242880",
       DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
       REDIS_URL: "redis://localhost:6380",
     });
@@ -45,6 +49,8 @@ describe("config validation", () => {
     expect(apiConfig.signedUploadUrlTtlSeconds).toBe(600);
     expect(apiConfig.signedDownloadUrlTtlSeconds).toBe(120);
     expect(apiConfig.uploadSessionTtlSeconds).toBe(3600);
+    expect(apiConfig.multipartUploadThresholdBytes).toBe(10485760);
+    expect(apiConfig.multipartChunkSizeBytes).toBe(5242880);
     expect(storageConfig.bucket).toBe("bucket");
     expect(storageConfig.signedDownloadUrlTtlSeconds).toBe(300);
   });

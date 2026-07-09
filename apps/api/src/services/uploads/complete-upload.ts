@@ -5,7 +5,8 @@ import { HttpError } from "../../middleware/error-handler";
 import type { AuditContext } from "../audit-log";
 import type { UploadFinalizationQueue } from "../queue";
 import type { InternalUser } from "../users";
-import { assertSessionCanBeQueued, getCorrelationId } from "./helpers";
+import { assertSessionCanBeQueued, getCorrelationId, markUploadExpired } from "./helpers";
+import { getMissingPartNumbers } from "./multipart-plan";
 
 const MAX_UPLOAD_FINALIZATION_ATTEMPTS = 3;
 
@@ -17,7 +18,7 @@ export interface UploadCompleteResult {
   correlationId: string;
 }
 
-export async function enqueueSinglePartUploadCompletion(
+export async function enqueueUploadCompletion(
   actor: InternalUser,
   uploadSessionId: string,
   auditContext: AuditContext,
@@ -68,13 +69,14 @@ export async function enqueueSinglePartUploadCompletion(
   assertSessionCanBeQueued(existingSession.status);
 
   if (existingSession.expiresAt.getTime() <= Date.now()) {
-    await markUploadFailed(
-      prisma,
-      existingSession.id,
-      existingSession.targetFileId,
-      "upload_session_expired",
-    );
+    await prisma.$transaction(async (tx) => {
+      await markUploadExpired(tx, existingSession.id, existingSession.targetFileId);
+    });
     throw new HttpError(410, "upload_session_expired", "Upload session has expired.");
+  }
+
+  if (existingSession.uploadType === "multipart") {
+    await assertMultipartUploadComplete(prisma, existingSession);
   }
 
   const queued = await prisma.$transaction(async (tx) => {
@@ -168,32 +170,40 @@ async function findLatestUploadFinalizationJob(prisma: PrismaClient, uploadSessi
   });
 }
 
-async function markUploadFailed(
+async function assertMultipartUploadComplete(
   prisma: PrismaClient,
-  uploadSessionId: string,
-  targetFileId: string | null,
-  failureReason: string,
+  uploadSession: {
+    id: string;
+    totalSizeBytes: bigint;
+    chunkSizeBytes: bigint | null;
+    multipartUploadId: string | null;
+  },
 ) {
-  await prisma.$transaction(async (tx) => {
-    await tx.uploadSession.update({
-      where: {
-        id: uploadSessionId,
-      },
-      data: {
-        status: "failed",
-        failureReason,
-      },
-    });
+  if (!uploadSession.chunkSizeBytes || !uploadSession.multipartUploadId) {
+    throw new HttpError(409, "upload_not_multipart", "Upload session is missing multipart state.");
+  }
 
-    if (targetFileId) {
-      await tx.file.update({
-        where: {
-          id: targetFileId,
-        },
-        data: {
-          status: "failed",
-        },
-      });
-    }
+  const chunks = await prisma.uploadChunk.findMany({
+    where: {
+      uploadSessionId: uploadSession.id,
+      status: {
+        in: ["uploaded", "verified"],
+      },
+    },
+    select: {
+      partNumber: true,
+    },
   });
+
+  const missingPartNumbers = getMissingPartNumbers({
+    totalSizeBytes: uploadSession.totalSizeBytes,
+    chunkSizeBytes: uploadSession.chunkSizeBytes,
+    uploadedPartNumbers: chunks.map((chunk) => chunk.partNumber),
+  });
+
+  if (missingPartNumbers.length > 0) {
+    throw new HttpError(409, "upload_parts_missing", "Upload is missing registered parts.", {
+      missingPartNumbers,
+    });
+  }
 }

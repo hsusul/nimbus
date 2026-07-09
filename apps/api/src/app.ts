@@ -70,6 +70,8 @@ export function createApp(dependencies: AppDependencies = {}) {
       maxFileSizeBytes: config.maxFileSizeBytes,
       signedUploadUrlTtlSeconds: config.signedUploadUrlTtlSeconds,
       uploadSessionTtlSeconds: config.uploadSessionTtlSeconds,
+      multipartUploadThresholdBytes: config.multipartUploadThresholdBytes,
+      multipartChunkSizeBytes: config.multipartChunkSizeBytes,
     });
   const downloadService =
     dependencies.downloadService ??

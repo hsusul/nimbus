@@ -1,10 +1,17 @@
 import type { ApiConfig } from "@nimbus/config";
 import { getPrismaClient } from "@nimbus/db";
+import { createLogger } from "@nimbus/logger";
 import type {
+  AbortMultipartUploadInput,
+  CompleteMultipartUploadInput,
+  CompleteMultipartUploadResult,
+  CreateMultipartUploadInput,
+  CreateMultipartUploadResult,
   ObjectLocation,
   ObjectMetadata,
   ObjectStorageProvider,
   SignedDownloadUrlInput,
+  SignedPartUploadUrlInput,
   SignedUploadUrlInput,
   SignedUrl,
 } from "@nimbus/storage";
@@ -18,6 +25,9 @@ import type { UploadFinalizationQueue } from "../src/services/queue";
 
 class FakeObjectStorageProvider implements ObjectStorageProvider {
   private readonly objects = new Map<string, ObjectMetadata & { body: string }>();
+  private readonly multipartUploads = new Map<string, ObjectLocation>();
+  readonly abortedMultipartUploads: AbortMultipartUploadInput[] = [];
+  private multipartSequence = 0;
 
   async createSignedUploadUrl(input: SignedUploadUrlInput): Promise<SignedUrl> {
     return {
@@ -31,6 +41,42 @@ class FakeObjectStorageProvider implements ObjectStorageProvider {
       url: `https://storage.test/download?bucket=${input.bucket}&key=${encodeURIComponent(input.objectKey)}&signature=fake`,
       expiresAt: new Date(Date.now() + input.expiresInSeconds * 1000),
     };
+  }
+
+  async createMultipartUpload(
+    input: CreateMultipartUploadInput,
+  ): Promise<CreateMultipartUploadResult> {
+    this.multipartSequence += 1;
+    const uploadId = `multipart-${this.multipartSequence}`;
+
+    this.multipartUploads.set(uploadId, {
+      bucket: input.bucket,
+      objectKey: input.objectKey,
+    });
+
+    return {
+      uploadId,
+    };
+  }
+
+  async createSignedPartUploadUrl(input: SignedPartUploadUrlInput): Promise<SignedUrl> {
+    return {
+      url: `https://storage.test/upload-part?bucket=${input.bucket}&uploadId=${input.uploadId}&partNumber=${input.partNumber}&signature=fake`,
+      expiresAt: new Date(Date.now() + input.expiresInSeconds * 1000),
+    };
+  }
+
+  async completeMultipartUpload(
+    _input: CompleteMultipartUploadInput,
+  ): Promise<CompleteMultipartUploadResult> {
+    return {
+      etag: "fake-multipart-etag",
+    };
+  }
+
+  async abortMultipartUpload(input: AbortMultipartUploadInput): Promise<void> {
+    this.abortedMultipartUploads.push(input);
+    this.multipartUploads.delete(input.uploadId);
   }
 
   async headObject(input: ObjectLocation): Promise<ObjectMetadata> {
@@ -93,6 +139,8 @@ const testConfig: ApiConfig = {
   signedUploadUrlTtlSeconds: 900,
   signedDownloadUrlTtlSeconds: 300,
   uploadSessionTtlSeconds: 86400,
+  multipartUploadThresholdBytes: 67108864,
+  multipartChunkSizeBytes: 8388608,
   databaseUrl: "postgresql://nimbus:nimbus@localhost:5432/nimbus?schema=public",
   redisUrl: "redis://localhost:6379",
   storage: {
@@ -145,6 +193,35 @@ async function startUpload(userSlug: string, filename: string, totalSizeBytes = 
     .expect(201);
 }
 
+async function startMultipartUpload(userSlug: string, filename: string) {
+  const rootFolderId = await ensureRootFolder(userSlug);
+
+  return request(app)
+    .post("/api/v1/uploads/start")
+    .set(authHeaders(userSlug))
+    .send({
+      folderId: rootFolderId,
+      filename,
+      mimeType: "application/octet-stream",
+      totalSizeBytes: "20971520",
+      uploadType: "multipart",
+    })
+    .expect(201);
+}
+
+function registerPart(userSlug: string, uploadSessionId: string, partNumber: number) {
+  const sizeBytes = partNumber === 3 ? "4194304" : "8388608";
+
+  return request(app)
+    .post(`/api/v1/uploads/${uploadSessionId}/chunks`)
+    .set(authHeaders(userSlug))
+    .send({
+      partNumber,
+      etag: `etag-${partNumber}`,
+      sizeBytes,
+    });
+}
+
 async function cleanupRunData() {
   const users = await prisma.user.findMany({
     where: {
@@ -183,6 +260,13 @@ async function cleanupRunData() {
         ownerId: {
           in: userIds,
         },
+      },
+    },
+  });
+  await prisma.uploadChunk.deleteMany({
+    where: {
+      ownerId: {
+        in: userIds,
       },
     },
   });
@@ -500,6 +584,289 @@ describe.sequential("single-part uploads and signed downloads", () => {
       expect.arrayContaining(["upload.started", "upload.completed", "file.download_requested"]),
     );
     expect(JSON.stringify(auditResponse.body)).not.toContain(download.body.data.url);
+  });
+});
+
+describe.sequential("multipart resumable uploads", () => {
+  it("starts a multipart upload with signed part metadata", async () => {
+    const response = await startMultipartUpload("multipart-start", "Large.bin");
+    const firstSignedPartUrl = response.body.data.multipart.signedParts[0].url as string;
+
+    expect(response.body.data).toMatchObject({
+      uploadSessionId: expect.any(String),
+      fileId: expect.any(String),
+      status: "created",
+      uploadType: "multipart",
+      multipart: {
+        chunkSizeBytes: "8388608",
+        partCount: 3,
+        signedParts: [
+          expect.objectContaining({ partNumber: 1, method: "PUT", sizeBytes: "8388608" }),
+          expect.objectContaining({ partNumber: 2, method: "PUT", sizeBytes: "8388608" }),
+          expect.objectContaining({ partNumber: 3, method: "PUT", sizeBytes: "4194304" }),
+        ],
+      },
+    });
+
+    const uploadSession = await prisma.uploadSession.findUniqueOrThrow({
+      where: {
+        id: response.body.data.uploadSessionId,
+      },
+    });
+
+    expect(uploadSession).toMatchObject({
+      uploadType: "multipart",
+      multipartUploadId: expect.any(String),
+      receivedBytes: 0n,
+    });
+    expect(uploadSession.chunkSizeBytes).toBe(8388608n);
+
+    const auditLog = await prisma.auditLog.findFirstOrThrow({
+      where: {
+        resourceType: "upload_session",
+        resourceId: uploadSession.id,
+        action: "upload.started",
+      },
+    });
+    const auditJson = JSON.stringify(auditLog);
+
+    expect(auditJson).not.toContain(firstSignedPartUrl);
+    expect(auditJson).not.toContain("upload-part");
+    expect(auditJson).not.toContain("signature=fake");
+  });
+
+  it("registers chunks idempotently and returns resume state", async () => {
+    const response = await startMultipartUpload("multipart-register", "Resume.bin");
+    const uploadSessionId = response.body.data.uploadSessionId as string;
+
+    const first = await registerPart("multipart-register", uploadSessionId, 1).expect(201);
+
+    expect(first.body.data).toMatchObject({
+      uploadSessionId,
+      status: "uploading",
+      receivedBytes: "8388608",
+      chunk: expect.objectContaining({
+        partNumber: 1,
+        etag: "etag-1",
+        sizeBytes: "8388608",
+        status: "uploaded",
+      }),
+      missingPartNumbers: [2, 3],
+    });
+
+    const duplicate = await registerPart("multipart-register", uploadSessionId, 1).expect(201);
+
+    expect(duplicate.body.data).toMatchObject({
+      uploadSessionId,
+      receivedBytes: "8388608",
+      missingPartNumbers: [2, 3],
+    });
+
+    await request(app)
+      .post(`/api/v1/uploads/${uploadSessionId}/chunks`)
+      .set(authHeaders("multipart-register"))
+      .send({
+        partNumber: 1,
+        etag: "different-etag",
+        sizeBytes: "8388608",
+      })
+      .expect(409);
+
+    const detail = await request(app)
+      .get(`/api/v1/uploads/${uploadSessionId}`)
+      .set(authHeaders("multipart-register"))
+      .expect(200);
+
+    expect(detail.body.data).toMatchObject({
+      uploadSessionId,
+      status: "uploading",
+      uploadType: "multipart",
+      receivedBytes: "8388608",
+      missingPartNumbers: [2, 3],
+    });
+    expect(detail.body.data.uploadedParts).toHaveLength(1);
+    expect(detail.body.data.signedParts).toHaveLength(2);
+
+    const chunks = await request(app)
+      .get(`/api/v1/uploads/${uploadSessionId}/chunks`)
+      .set(authHeaders("multipart-register"))
+      .expect(200);
+
+    expect(chunks.body.data).toMatchObject({
+      uploadSessionId,
+      missingPartNumbers: [2, 3],
+    });
+    expect(chunks.body.data.uploadedParts).toHaveLength(1);
+  });
+
+  it("rejects completion with missing chunks and queues when all chunks are registered", async () => {
+    const response = await startMultipartUpload("multipart-complete", "Complete Large.bin");
+    const uploadSessionId = response.body.data.uploadSessionId as string;
+
+    await registerPart("multipart-complete", uploadSessionId, 1).expect(201);
+
+    await request(app)
+      .post(`/api/v1/uploads/${uploadSessionId}/complete`)
+      .set(authHeaders("multipart-complete"))
+      .expect(409)
+      .expect((missing) => {
+        expect(missing.body.error.code).toBe("upload_parts_missing");
+        expect(missing.body.error.details.missingPartNumbers).toEqual([2, 3]);
+      });
+
+    await registerPart("multipart-complete", uploadSessionId, 2).expect(201);
+    await registerPart("multipart-complete", uploadSessionId, 3).expect(201);
+
+    const queueLengthBefore = uploadFinalizationQueue.jobs.length;
+    const completion = await request(app)
+      .post(`/api/v1/uploads/${uploadSessionId}/complete`)
+      .set(authHeaders("multipart-complete"))
+      .expect(200);
+
+    expect(completion.body.data).toMatchObject({
+      uploadSessionId,
+      status: "completing",
+      fileId: response.body.data.fileId,
+      backgroundJobId: expect.any(String),
+    });
+    expect(uploadFinalizationQueue.jobs).toHaveLength(queueLengthBefore + 1);
+
+    const uploadSession = await prisma.uploadSession.findUniqueOrThrow({
+      where: {
+        id: uploadSessionId,
+      },
+    });
+    const backgroundJob = await prisma.backgroundJob.findUniqueOrThrow({
+      where: {
+        id: completion.body.data.backgroundJobId,
+      },
+    });
+    const jobJson = JSON.stringify(backgroundJob);
+
+    expect(uploadSession).toMatchObject({
+      status: "completing",
+      receivedBytes: 20971520n,
+    });
+    expect(jobJson).not.toContain("upload-part");
+    expect(jobJson).not.toContain("signature=fake");
+  });
+
+  it("does not write signed part URLs to API logger output", async () => {
+    const logLines: string[] = [];
+    const loggedApp = createApp({
+      config: testConfig,
+      readinessChecker: async () => ({ postgres: true, redis: true }),
+      storageProvider: storage,
+      uploadFinalizationQueue,
+      logger: createLogger({
+        service: "multipart-logger-test",
+        level: "info",
+        sink: (line) => logLines.push(line),
+      }),
+    });
+    const rootFolderId = await ensureRootFolder("multipart-logger");
+    const response = await request(loggedApp)
+      .post("/api/v1/uploads/start")
+      .set(authHeaders("multipart-logger"))
+      .send({
+        folderId: rootFolderId,
+        filename: "Logger Large.bin",
+        mimeType: "application/octet-stream",
+        totalSizeBytes: "20971520",
+        uploadType: "multipart",
+      })
+      .expect(201);
+    const logOutput = logLines.join("\n");
+
+    expect(response.body.data.multipart.signedParts[0].url).toContain("signature=fake");
+    expect(logOutput).not.toContain(response.body.data.multipart.signedParts[0].url);
+    expect(logOutput).not.toContain("upload-part");
+    expect(logOutput).not.toContain("signature=fake");
+  });
+
+  it("cancels multipart uploads, hides placeholders, and allows filename reuse", async () => {
+    const userSlug = "multipart-cancel";
+    const filename = "Canceled Large.bin";
+    const rootFolderId = await ensureRootFolder(userSlug);
+    const response = await request(app)
+      .post("/api/v1/uploads/start")
+      .set(authHeaders(userSlug))
+      .send({
+        folderId: rootFolderId,
+        filename,
+        mimeType: "application/octet-stream",
+        totalSizeBytes: "20971520",
+        uploadType: "multipart",
+      })
+      .expect(201);
+    const abortCountBefore = storage.abortedMultipartUploads.length;
+
+    const cancellation = await request(app)
+      .post(`/api/v1/uploads/${response.body.data.uploadSessionId}/cancel`)
+      .set(authHeaders(userSlug))
+      .expect(200);
+
+    expect(cancellation.body.data).toMatchObject({
+      uploadSessionId: response.body.data.uploadSessionId,
+      fileId: response.body.data.fileId,
+      status: "canceled",
+      abortedMultipartUpload: true,
+    });
+    expect(storage.abortedMultipartUploads).toHaveLength(abortCountBefore + 1);
+
+    const children = await request(app)
+      .get(`/api/v1/folders/${rootFolderId}/children`)
+      .set(authHeaders(userSlug))
+      .expect(200);
+
+    expect(children.body.data.children.map((child: { id: string }) => child.id)).not.toContain(
+      response.body.data.fileId,
+    );
+
+    await request(app)
+      .post("/api/v1/uploads/start")
+      .set(authHeaders(userSlug))
+      .send({
+        folderId: rootFolderId,
+        filename,
+        mimeType: "application/octet-stream",
+        totalSizeBytes: "20971520",
+        uploadType: "multipart",
+      })
+      .expect(201);
+  });
+
+  it("does not allow another user to inspect, register, complete, or cancel an upload", async () => {
+    const response = await startMultipartUpload("multipart-owner", "Private Large.bin");
+    const uploadSessionId = response.body.data.uploadSessionId as string;
+
+    await ensureRootFolder("multipart-intruder");
+
+    await request(app)
+      .get(`/api/v1/uploads/${uploadSessionId}`)
+      .set(authHeaders("multipart-intruder"))
+      .expect(404);
+    await request(app)
+      .get(`/api/v1/uploads/${uploadSessionId}/chunks`)
+      .set(authHeaders("multipart-intruder"))
+      .expect(404);
+    await request(app)
+      .post(`/api/v1/uploads/${uploadSessionId}/chunks`)
+      .set(authHeaders("multipart-intruder"))
+      .send({
+        partNumber: 1,
+        etag: "etag-1",
+        sizeBytes: "8388608",
+      })
+      .expect(404);
+    await request(app)
+      .post(`/api/v1/uploads/${uploadSessionId}/complete`)
+      .set(authHeaders("multipart-intruder"))
+      .expect(404);
+    await request(app)
+      .post(`/api/v1/uploads/${uploadSessionId}/cancel`)
+      .set(authHeaders("multipart-intruder"))
+      .expect(404);
   });
 });
 

@@ -1,4 +1,7 @@
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -6,13 +9,20 @@ import {
   NotFound,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import {
   ObjectNotFoundError,
+  type AbortMultipartUploadInput,
+  type CompleteMultipartUploadInput,
+  type CompleteMultipartUploadResult,
+  type CreateMultipartUploadInput,
+  type CreateMultipartUploadResult,
   type ObjectMetadata,
   type ObjectStorageProvider,
+  type SignedPartUploadUrlInput,
   type SignedDownloadUrlInput,
   type SignedUploadUrlInput,
   type SignedUrl,
@@ -69,6 +79,74 @@ export class S3CompatibleStorageProvider implements ObjectStorageProvider {
     return sign(command, this.client, input.expiresInSeconds);
   }
 
+  async createMultipartUpload(
+    input: CreateMultipartUploadInput,
+  ): Promise<CreateMultipartUploadResult> {
+    const result = await this.client.send(
+      new CreateMultipartUploadCommand({
+        Bucket: input.bucket,
+        Key: input.objectKey,
+        ContentType: input.contentType,
+        Metadata: input.checksumSha256
+          ? {
+              sha256: input.checksumSha256,
+            }
+          : undefined,
+      }),
+    );
+
+    if (!result.UploadId) {
+      throw new Error("create_multipart_upload_missing_upload_id");
+    }
+
+    return {
+      uploadId: result.UploadId,
+    };
+  }
+
+  async createSignedPartUploadUrl(input: SignedPartUploadUrlInput): Promise<SignedUrl> {
+    const command = new UploadPartCommand({
+      Bucket: input.bucket,
+      Key: input.objectKey,
+      UploadId: input.uploadId,
+      PartNumber: input.partNumber,
+    });
+
+    return sign(command, this.client, input.expiresInSeconds);
+  }
+
+  async completeMultipartUpload(
+    input: CompleteMultipartUploadInput,
+  ): Promise<CompleteMultipartUploadResult> {
+    const result = await this.client.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: input.bucket,
+        Key: input.objectKey,
+        UploadId: input.uploadId,
+        MultipartUpload: {
+          Parts: input.parts.map((part) => ({
+            PartNumber: part.partNumber,
+            ETag: part.etag,
+          })),
+        },
+      }),
+    );
+
+    return {
+      etag: result.ETag?.replaceAll('"', "") ?? null,
+    };
+  }
+
+  async abortMultipartUpload(input: AbortMultipartUploadInput): Promise<void> {
+    await this.client.send(
+      new AbortMultipartUploadCommand({
+        Bucket: input.bucket,
+        Key: input.objectKey,
+        UploadId: input.uploadId,
+      }),
+    );
+  }
+
   async headObject(input: ObjectLocation): Promise<ObjectMetadata> {
     try {
       const result = await this.client.send(
@@ -112,12 +190,12 @@ export class S3CompatibleStorageProvider implements ObjectStorageProvider {
 }
 
 async function sign(
-  command: PutObjectCommand | GetObjectCommand,
+  command: PutObjectCommand | GetObjectCommand | UploadPartCommand,
   client: S3Client,
   expiresInSeconds: number,
 ): Promise<SignedUrl> {
   return {
-    url: await getSignedUrl(client, command, {
+    url: await getSignedUrl(client, command as Parameters<typeof getSignedUrl>[1], {
       expiresIn: expiresInSeconds,
     }),
     expiresAt: new Date(Date.now() + expiresInSeconds * 1000),

@@ -24,6 +24,7 @@ model User {
   files     File[]     @relation("FileOwner")
   auditLogs AuditLog[] @relation("AuditActor")
   uploadSessions UploadSession[] @relation("UploadSessionOwner")
+  uploadChunks UploadChunk[] @relation("UploadChunkOwner")
   createdFileVersions FileVersion[] @relation("FileVersionCreator")
 
   @@index([status])
@@ -97,6 +98,10 @@ model UploadSession {
   expectedSha256   String?   @map("expected_sha256")
   finalObjectKey   String    @map("final_object_key")
   bucket           String
+  uploadType       String    @default("single_part") @map("upload_type")
+  multipartUploadId String?  @map("multipart_upload_id")
+  chunkSizeBytes   BigInt?   @map("chunk_size_bytes")
+  receivedBytes    BigInt    @default(0) @map("received_bytes")
   status           String    @default("created")
   correlationId    String?   @map("correlation_id")
   expiresAt        DateTime  @map("expires_at")
@@ -110,13 +115,37 @@ model UploadSession {
   targetFile   File?         @relation("UploadSessionTargetFile", fields: [targetFileId], references: [id], onDelete: SetNull)
   fileVersion  FileVersion?
   backgroundJobs BackgroundJob[]
+  uploadChunks UploadChunk[]
 
   @@index([ownerId, status])
   @@index([targetFolderId])
   @@index([targetFileId])
   @@index([expiresAt])
   @@index([correlationId])
+  @@index([uploadType])
   @@map("upload_sessions")
+}
+
+model UploadChunk {
+  id              String   @id @default(cuid())
+  uploadSessionId String   @map("upload_session_id")
+  ownerId         String   @map("owner_id")
+  partNumber      Int      @map("part_number")
+  sizeBytes       BigInt   @map("size_bytes")
+  sha256          String?
+  etag            String
+  status          String   @default("uploaded")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  uploadSession UploadSession @relation(fields: [uploadSessionId], references: [id], onDelete: Cascade)
+  owner         User          @relation("UploadChunkOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([uploadSessionId, partNumber])
+  @@index([uploadSessionId])
+  @@index([uploadSessionId, status])
+  @@index([ownerId])
+  @@map("upload_chunks")
 }
 
 model BackgroundJob {

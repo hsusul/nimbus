@@ -18,6 +18,8 @@ const testConfig: ApiConfig = {
   signedUploadUrlTtlSeconds: 900,
   signedDownloadUrlTtlSeconds: 300,
   uploadSessionTtlSeconds: 86400,
+  multipartUploadThresholdBytes: 67108864,
+  multipartChunkSizeBytes: 8388608,
   databaseUrl: "postgresql://nimbus:nimbus@localhost:5432/nimbus?schema=public",
   redisUrl: "redis://localhost:6379",
   storage: {

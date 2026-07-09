@@ -68,6 +68,20 @@ const apiEnvSchema = z.object({
     .max(604800)
     .optional()
     .default(86400),
+  MULTIPART_UPLOAD_THRESHOLD_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional()
+    .default(67108864),
+  MULTIPART_CHUNK_SIZE_BYTES: z.coerce
+    .number()
+    .int()
+    .min(5242880)
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional()
+    .default(8388608),
 });
 
 const webEnvSchema = z.object({
@@ -110,6 +124,8 @@ export function getApiConfig(env: NodeJS.ProcessEnv = process.env) {
     signedUploadUrlTtlSeconds: config.SIGNED_UPLOAD_URL_TTL_SECONDS,
     signedDownloadUrlTtlSeconds: config.SIGNED_DOWNLOAD_URL_TTL_SECONDS,
     uploadSessionTtlSeconds: config.UPLOAD_SESSION_TTL_SECONDS,
+    multipartUploadThresholdBytes: config.MULTIPART_UPLOAD_THRESHOLD_BYTES,
+    multipartChunkSizeBytes: config.MULTIPART_CHUNK_SIZE_BYTES,
     databaseUrl: config.DATABASE_URL,
     redisUrl: config.REDIS_URL,
     storage: getStorageConfig(env),

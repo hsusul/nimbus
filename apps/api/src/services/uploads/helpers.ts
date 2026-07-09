@@ -1,4 +1,3 @@
-import type { UploadStartRequest } from "@nimbus/contracts";
 import { Prisma, type PrismaClient } from "@nimbus/db";
 
 import { HttpError } from "../../middleware/error-handler";
@@ -48,7 +47,7 @@ export async function assertFileNameAvailable(
   }
 }
 
-export function parseSizeBytes(value: UploadStartRequest["totalSizeBytes"]): bigint {
+export function parseSizeBytes(value: string | number): bigint {
   const sizeBytes = BigInt(value);
 
   if (sizeBytes < 0n) {
@@ -65,5 +64,36 @@ export function getCorrelationId(input: { correlationId?: string | null; request
 export function assertSessionCanBeQueued(status: string) {
   if (["failed", "canceled", "expired"].includes(status)) {
     throw new HttpError(409, "upload_not_completable", "Upload session cannot be completed.");
+  }
+}
+
+export function isTerminalUploadStatus(status: string) {
+  return ["completed", "failed", "canceled", "expired"].includes(status);
+}
+
+export async function markUploadExpired(
+  tx: TransactionClient,
+  uploadSessionId: string,
+  targetFileId: string | null,
+) {
+  await tx.uploadSession.update({
+    where: {
+      id: uploadSessionId,
+    },
+    data: {
+      status: "expired",
+      failureReason: "upload_session_expired",
+    },
+  });
+
+  if (targetFileId) {
+    await tx.file.update({
+      where: {
+        id: targetFileId,
+      },
+      data: {
+        status: "failed",
+      },
+    });
   }
 }

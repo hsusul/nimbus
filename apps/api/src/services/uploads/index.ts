@@ -1,30 +1,57 @@
-import type { UploadStartRequest } from "@nimbus/contracts";
+import type { RegisterUploadChunkRequest, UploadStartRequest } from "@nimbus/contracts";
 import { getPrismaClient, type PrismaClient } from "@nimbus/db";
 import type { ObjectStorageProvider } from "@nimbus/storage";
 
 import type { AuditContext } from "../audit-log";
 import type { UploadFinalizationQueue } from "../queue";
 import type { InternalUser } from "../users";
-import { enqueueSinglePartUploadCompletion, type UploadCompleteResult } from "./complete-upload";
+import { cancelUpload, type UploadCancelResult } from "./cancel-upload";
+import { registerUploadChunk, type RegisterUploadChunkResult } from "./chunks";
+import { enqueueUploadCompletion, type UploadCompleteResult } from "./complete-upload";
+import { startUpload, type UploadServiceOptions, type UploadStartResult } from "./start-upload";
 import {
-  startSinglePartUpload,
-  type UploadServiceOptions,
-  type UploadStartResult,
-} from "./start-upload";
+  getUploadChunks,
+  getUploadSessionDetail,
+  type UploadChunksResult,
+  type UploadSessionDetailResult,
+} from "./status";
 
-export type { UploadCompleteResult, UploadServiceOptions, UploadStartResult };
+export type {
+  RegisterUploadChunkResult,
+  UploadCancelResult,
+  UploadChunksResult,
+  UploadCompleteResult,
+  UploadServiceOptions,
+  UploadSessionDetailResult,
+  UploadStartResult,
+};
 
 export interface UploadService {
-  startSinglePartUpload(
+  startUpload(
     actor: InternalUser,
     input: UploadStartRequest,
     auditContext: AuditContext,
   ): Promise<UploadStartResult>;
-  completeSinglePartUpload(
+  getUploadSessionDetail(
+    actor: InternalUser,
+    uploadSessionId: string,
+  ): Promise<UploadSessionDetailResult>;
+  getUploadChunks(actor: InternalUser, uploadSessionId: string): Promise<UploadChunksResult>;
+  registerUploadChunk(
+    actor: InternalUser,
+    uploadSessionId: string,
+    input: RegisterUploadChunkRequest,
+  ): Promise<RegisterUploadChunkResult>;
+  completeUpload(
     actor: InternalUser,
     uploadSessionId: string,
     auditContext: AuditContext,
   ): Promise<UploadCompleteResult>;
+  cancelUpload(
+    actor: InternalUser,
+    uploadSessionId: string,
+    auditContext: AuditContext,
+  ): Promise<UploadCancelResult>;
 }
 
 export class PrismaUploadService implements UploadService {
@@ -35,32 +62,52 @@ export class PrismaUploadService implements UploadService {
     private readonly prisma: PrismaClient = getPrismaClient(),
   ) {}
 
-  startSinglePartUpload(
+  startUpload(
     actor: InternalUser,
     input: UploadStartRequest,
     auditContext: AuditContext,
   ): Promise<UploadStartResult> {
-    return startSinglePartUpload(
-      actor,
-      input,
-      auditContext,
-      this.storage,
-      this.options,
-      this.prisma,
-    );
+    return startUpload(actor, input, auditContext, this.storage, this.options, this.prisma);
   }
 
-  completeSinglePartUpload(
+  getUploadSessionDetail(
+    actor: InternalUser,
+    uploadSessionId: string,
+  ): Promise<UploadSessionDetailResult> {
+    return getUploadSessionDetail(actor, uploadSessionId, this.storage, this.options, this.prisma);
+  }
+
+  getUploadChunks(actor: InternalUser, uploadSessionId: string): Promise<UploadChunksResult> {
+    return getUploadChunks(actor, uploadSessionId, this.prisma);
+  }
+
+  registerUploadChunk(
+    actor: InternalUser,
+    uploadSessionId: string,
+    input: RegisterUploadChunkRequest,
+  ): Promise<RegisterUploadChunkResult> {
+    return registerUploadChunk(actor, uploadSessionId, input, this.prisma);
+  }
+
+  completeUpload(
     actor: InternalUser,
     uploadSessionId: string,
     auditContext: AuditContext,
   ): Promise<UploadCompleteResult> {
-    return enqueueSinglePartUploadCompletion(
+    return enqueueUploadCompletion(
       actor,
       uploadSessionId,
       auditContext,
       this.uploadFinalizationQueue,
       this.prisma,
     );
+  }
+
+  cancelUpload(
+    actor: InternalUser,
+    uploadSessionId: string,
+    auditContext: AuditContext,
+  ): Promise<UploadCancelResult> {
+    return cancelUpload(actor, uploadSessionId, auditContext, this.storage, this.prisma);
   }
 }

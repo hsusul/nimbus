@@ -75,6 +75,44 @@ export async function finalizeUploadSession(
     return;
   }
 
+  const existingVersion = await prisma.fileVersion.findUnique({
+    where: {
+      uploadSessionId: uploadSession.id,
+    },
+  });
+
+  if (existingVersion) {
+    await completeWithExistingVersion(
+      prisma,
+      parsed.backgroundJobId,
+      uploadSession.id,
+      uploadSession.targetFileId,
+      existingVersion.id,
+      correlationId,
+    );
+    return;
+  }
+
+  if (uploadSession.uploadType === "multipart") {
+    const completed = await completeMultipartUploadForSession(
+      prisma,
+      dependencies.storage,
+      uploadSession,
+    );
+
+    if (!completed.ok) {
+      await failUploadTerminal(
+        prisma,
+        parsed.backgroundJobId,
+        uploadSession.id,
+        uploadSession.targetFileId,
+        completed.failureReason,
+        correlationId,
+      );
+      return;
+    }
+  }
+
   let objectMetadata: ObjectMetadata;
 
   try {
@@ -289,6 +327,116 @@ export async function finalizeUploadSession(
   });
 }
 
+async function completeMultipartUploadForSession(
+  prisma: PrismaClient,
+  storage: ObjectStorageProvider,
+  uploadSession: {
+    id: string;
+    bucket: string;
+    finalObjectKey: string;
+    multipartUploadId: string | null;
+    totalSizeBytes: bigint;
+    chunkSizeBytes: bigint | null;
+  },
+): Promise<{ ok: true } | { ok: false; failureReason: string }> {
+  if (!uploadSession.multipartUploadId || !uploadSession.chunkSizeBytes) {
+    return {
+      ok: false,
+      failureReason: "missing_multipart_state",
+    };
+  }
+
+  const chunks = await prisma.uploadChunk.findMany({
+    where: {
+      uploadSessionId: uploadSession.id,
+      status: {
+        in: ["uploaded", "verified"],
+      },
+    },
+    orderBy: {
+      partNumber: "asc",
+    },
+  });
+  const missingPartNumbers = getMissingPartNumbers({
+    totalSizeBytes: uploadSession.totalSizeBytes,
+    chunkSizeBytes: uploadSession.chunkSizeBytes,
+    uploadedPartNumbers: chunks.map((chunk) => chunk.partNumber),
+  });
+
+  if (missingPartNumbers.length > 0) {
+    return {
+      ok: false,
+      failureReason: "multipart_parts_missing",
+    };
+  }
+
+  await storage.completeMultipartUpload({
+    bucket: uploadSession.bucket,
+    objectKey: uploadSession.finalObjectKey,
+    uploadId: uploadSession.multipartUploadId,
+    parts: chunks.map((chunk) => ({
+      partNumber: chunk.partNumber,
+      etag: chunk.etag,
+    })),
+  });
+
+  return {
+    ok: true,
+  };
+}
+
+async function completeWithExistingVersion(
+  prisma: PrismaClient,
+  backgroundJobId: string,
+  uploadSessionId: string,
+  targetFileId: string,
+  fileVersionId: string,
+  correlationId: string,
+) {
+  await prisma.$transaction(async (tx) => {
+    const fileVersion = await tx.fileVersion.findUniqueOrThrow({
+      where: {
+        id: fileVersionId,
+      },
+    });
+
+    await tx.file.update({
+      where: {
+        id: targetFileId,
+      },
+      data: {
+        status: "active",
+        currentVersionId: fileVersion.id,
+        sizeBytes: fileVersion.sizeBytes,
+        contentHash: fileVersion.sha256,
+        mimeType: fileVersion.mimeType,
+      },
+    });
+    await tx.uploadSession.update({
+      where: {
+        id: uploadSessionId,
+      },
+      data: {
+        status: "completed",
+        completedAt: new Date(),
+        failureReason: null,
+        correlationId,
+      },
+    });
+    await tx.backgroundJob.update({
+      where: {
+        id: backgroundJobId,
+      },
+      data: {
+        status: "succeeded",
+        lastError: null,
+        correlationId,
+        completedAt: new Date(),
+      },
+    });
+  });
+}
+
 export async function markUploadFinalizationJobDeadLettered(
   backgroundJobId: string,
   error: unknown,
@@ -417,6 +565,36 @@ async function getNextVersionNumber(tx: Prisma.TransactionClient, fileId: string
 
 function getHeadSha256(metadata: ObjectMetadata): string | null {
   return metadata.metadata["sha256"] ?? metadata.metadata["nimbus-sha256"] ?? null;
+}
+
+function getMissingPartNumbers(input: {
+  totalSizeBytes: bigint;
+  chunkSizeBytes: bigint;
+  uploadedPartNumbers: number[];
+}): number[] {
+  const partCount = calculatePartCount(input.totalSizeBytes, input.chunkSizeBytes);
+  const uploaded = new Set(input.uploadedPartNumbers);
+  const missing: number[] = [];
+
+  for (let partNumber = 1; partNumber <= partCount; partNumber += 1) {
+    if (!uploaded.has(partNumber)) {
+      missing.push(partNumber);
+    }
+  }
+
+  return missing;
+}
+
+function calculatePartCount(totalSizeBytes: bigint, chunkSizeBytes: bigint): number {
+  if (chunkSizeBytes <= 0n) {
+    throw new Error("chunk_size_must_be_positive");
+  }
+
+  if (totalSizeBytes <= 0n) {
+    return 1;
+  }
+
+  return Number((totalSizeBytes + chunkSizeBytes - 1n) / chunkSizeBytes);
 }
 
 export { UPLOAD_FINALIZATION_QUEUE_NAME };

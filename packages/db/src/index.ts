@@ -5,6 +5,7 @@ export type {
   File,
   FileVersion,
   Folder,
+  UploadChunk,
   UploadSession,
   User,
 } from "@prisma/client";

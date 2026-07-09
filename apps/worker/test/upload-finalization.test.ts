@@ -1,10 +1,16 @@
 import { UPLOAD_FINALIZATION_QUEUE_NAME } from "@nimbus/contracts";
 import { getPrismaClient } from "@nimbus/db";
 import type {
+  AbortMultipartUploadInput,
+  CompleteMultipartUploadInput,
+  CompleteMultipartUploadResult,
+  CreateMultipartUploadInput,
+  CreateMultipartUploadResult,
   ObjectLocation,
   ObjectMetadata,
   ObjectStorageProvider,
   SignedDownloadUrlInput,
+  SignedPartUploadUrlInput,
   SignedUploadUrlInput,
   SignedUrl,
 } from "@nimbus/storage";
@@ -16,13 +22,50 @@ import { finalizeUploadSession } from "../src/jobs/upload-finalization";
 
 class FakeObjectStorageProvider implements ObjectStorageProvider {
   private readonly objects = new Map<string, ObjectMetadata>();
+  private readonly multipartObjects = new Map<string, ObjectMetadata>();
   private transientError: Error | null = null;
+  readonly completedMultipartUploads: CompleteMultipartUploadInput[] = [];
 
   async createSignedUploadUrl(_input: SignedUploadUrlInput): Promise<SignedUrl> {
     throw new Error("not implemented");
   }
 
   async createSignedDownloadUrl(_input: SignedDownloadUrlInput): Promise<SignedUrl> {
+    throw new Error("not implemented");
+  }
+
+  async createMultipartUpload(
+    _input: CreateMultipartUploadInput,
+  ): Promise<CreateMultipartUploadResult> {
+    throw new Error("not implemented");
+  }
+
+  async createSignedPartUploadUrl(_input: SignedPartUploadUrlInput): Promise<SignedUrl> {
+    throw new Error("not implemented");
+  }
+
+  async completeMultipartUpload(
+    input: CompleteMultipartUploadInput,
+  ): Promise<CompleteMultipartUploadResult> {
+    if (this.transientError) {
+      const error = this.transientError;
+      this.transientError = null;
+      throw error;
+    }
+
+    this.completedMultipartUploads.push(input);
+    const object = this.multipartObjects.get(toObjectMapKey(input));
+
+    if (object) {
+      this.objects.set(toObjectMapKey(input), object);
+    }
+
+    return {
+      etag: object?.etag ?? "fake-multipart-etag",
+    };
+  }
+
+  async abortMultipartUpload(_input: AbortMultipartUploadInput): Promise<void> {
     throw new Error("not implemented");
   }
 
@@ -52,6 +95,19 @@ class FakeObjectStorageProvider implements ObjectStorageProvider {
       objectKey: input.objectKey,
       sizeBytes: input.sizeBytes,
       etag: "fake-etag",
+      contentType: input.contentType,
+      metadata: input.sha256 ? { sha256: input.sha256 } : {},
+    });
+  }
+
+  stageMultipartObject(
+    input: ObjectLocation & { sizeBytes: bigint; contentType: string; sha256?: string },
+  ) {
+    this.multipartObjects.set(toObjectMapKey(input), {
+      bucket: input.bucket,
+      objectKey: input.objectKey,
+      sizeBytes: input.sizeBytes,
+      etag: "fake-multipart-etag",
       contentType: input.contentType,
       metadata: input.sha256 ? { sha256: input.sha256 } : {},
     });
@@ -113,6 +169,13 @@ async function cleanupRunData() {
         ownerId: {
           in: userIds,
         },
+      },
+    },
+  });
+  await prisma.uploadChunk.deleteMany({
+    where: {
+      ownerId: {
+        in: userIds,
       },
     },
   });
@@ -405,6 +468,195 @@ describe.sequential("upload finalization worker", () => {
     });
     expect(versionCount).toBe(0);
   });
+
+  it("completes multipart uploads with ordered parts and creates one file version", async () => {
+    const fixture = await createUploadFixture("multipart-success", {
+      totalSizeBytes: 20n,
+      expectedSha256: "sha-multipart-success",
+      uploadType: "multipart",
+      chunkSizeBytes: 8n,
+      multipartUploadId: "multipart-success-upload",
+    });
+
+    await createUploadChunks(fixture, [
+      { partNumber: 2, sizeBytes: 8n, etag: "etag-2" },
+      { partNumber: 1, sizeBytes: 8n, etag: "etag-1" },
+      { partNumber: 3, sizeBytes: 4n, etag: "etag-3" },
+    ]);
+    storage.stageMultipartObject({
+      bucket: "nimbus-test",
+      objectKey: fixture.objectKey,
+      sizeBytes: 20n,
+      contentType: "text/plain",
+      sha256: "sha-multipart-success",
+    });
+
+    await finalizeUploadSession(
+      {
+        uploadSessionId: fixture.uploadSessionId,
+        backgroundJobId: fixture.backgroundJobId,
+        correlationId: "corr-multipart",
+      },
+      { prisma, storage },
+    );
+
+    const [file, uploadSession, versions] = await Promise.all([
+      prisma.file.findUniqueOrThrow({
+        where: {
+          id: fixture.fileId,
+        },
+      }),
+      prisma.uploadSession.findUniqueOrThrow({
+        where: {
+          id: fixture.uploadSessionId,
+        },
+      }),
+      prisma.fileVersion.findMany({
+        where: {
+          uploadSessionId: fixture.uploadSessionId,
+        },
+      }),
+    ]);
+    const completed = storage.completedMultipartUploads.at(-1);
+
+    expect(completed?.parts).toEqual([
+      { partNumber: 1, etag: "etag-1" },
+      { partNumber: 2, etag: "etag-2" },
+      { partNumber: 3, etag: "etag-3" },
+    ]);
+    expect(file).toMatchObject({
+      status: "active",
+      currentVersionId: fixture.plannedVersionId,
+      contentHash: "sha-multipart-success",
+    });
+    expect(file.sizeBytes).toBe(20n);
+    expect(uploadSession.status).toBe("completed");
+    expect(versions).toHaveLength(1);
+  });
+
+  it("does not create duplicate versions for duplicate multipart worker execution", async () => {
+    const fixture = await createUploadFixture("multipart-duplicate", {
+      totalSizeBytes: 12n,
+      uploadType: "multipart",
+      chunkSizeBytes: 8n,
+      multipartUploadId: "multipart-duplicate-upload",
+    });
+
+    await createUploadChunks(fixture, [
+      { partNumber: 1, sizeBytes: 8n, etag: "etag-1" },
+      { partNumber: 2, sizeBytes: 4n, etag: "etag-2" },
+    ]);
+    storage.stageMultipartObject({
+      bucket: "nimbus-test",
+      objectKey: fixture.objectKey,
+      sizeBytes: 12n,
+      contentType: "text/plain",
+    });
+
+    await finalizeUploadSession(
+      {
+        uploadSessionId: fixture.uploadSessionId,
+        backgroundJobId: fixture.backgroundJobId,
+        correlationId: "corr-multipart-duplicate",
+      },
+      { prisma, storage },
+    );
+    await finalizeUploadSession(
+      {
+        uploadSessionId: fixture.uploadSessionId,
+        backgroundJobId: fixture.backgroundJobId,
+        correlationId: "corr-multipart-duplicate",
+      },
+      { prisma, storage },
+    );
+
+    const versionCount = await prisma.fileVersion.count({
+      where: {
+        uploadSessionId: fixture.uploadSessionId,
+      },
+    });
+
+    expect(versionCount).toBe(1);
+  });
+
+  it("marks multipart size mismatches as terminal upload failures", async () => {
+    const fixture = await createUploadFixture("multipart-size-mismatch", {
+      totalSizeBytes: 12n,
+      uploadType: "multipart",
+      chunkSizeBytes: 8n,
+      multipartUploadId: "multipart-size-mismatch-upload",
+    });
+
+    await createUploadChunks(fixture, [
+      { partNumber: 1, sizeBytes: 8n, etag: "etag-1" },
+      { partNumber: 2, sizeBytes: 4n, etag: "etag-2" },
+    ]);
+    storage.stageMultipartObject({
+      bucket: "nimbus-test",
+      objectKey: fixture.objectKey,
+      sizeBytes: 11n,
+      contentType: "text/plain",
+    });
+
+    await finalizeUploadSession(
+      {
+        uploadSessionId: fixture.uploadSessionId,
+        backgroundJobId: fixture.backgroundJobId,
+        correlationId: "corr-multipart-size",
+      },
+      { prisma, storage },
+    );
+
+    await expectTerminalFailure(fixture, "size_mismatch", "corr-multipart-size-mismatch");
+  });
+
+  it("throws transient multipart storage errors for BullMQ retry", async () => {
+    const fixture = await createUploadFixture("multipart-transient", {
+      totalSizeBytes: 12n,
+      uploadType: "multipart",
+      chunkSizeBytes: 8n,
+      multipartUploadId: "multipart-transient-upload",
+    });
+
+    await createUploadChunks(fixture, [
+      { partNumber: 1, sizeBytes: 8n, etag: "etag-1" },
+      { partNumber: 2, sizeBytes: 4n, etag: "etag-2" },
+    ]);
+    storage.failNextHeadObject(new Error("temporary multipart outage"));
+
+    await expect(
+      finalizeUploadSession(
+        {
+          uploadSessionId: fixture.uploadSessionId,
+          backgroundJobId: fixture.backgroundJobId,
+          correlationId: "corr-multipart-transient",
+        },
+        { prisma, storage },
+      ),
+    ).rejects.toThrow("temporary multipart outage");
+
+    const [uploadSession, backgroundJob, versionCount] = await Promise.all([
+      prisma.uploadSession.findUniqueOrThrow({
+        where: {
+          id: fixture.uploadSessionId,
+        },
+      }),
+      prisma.backgroundJob.findUniqueOrThrow({
+        where: {
+          id: fixture.backgroundJobId,
+        },
+      }),
+      prisma.fileVersion.count({
+        where: {
+          uploadSessionId: fixture.uploadSessionId,
+        },
+      }),
+    ]);
+
+    expect(uploadSession.status).toBe("completing");
+    expect(backgroundJob.status).toBe("running");
+    expect(versionCount).toBe(0);
+  });
 });
 
 async function createUploadFixture(
@@ -412,6 +664,9 @@ async function createUploadFixture(
   options: {
     totalSizeBytes: bigint;
     expectedSha256?: string;
+    uploadType?: "single_part" | "multipart";
+    chunkSizeBytes?: bigint;
+    multipartUploadId?: string;
   },
 ): Promise<UploadFixture> {
   const user = await prisma.user.create({
@@ -456,6 +711,10 @@ async function createUploadFixture(
       expectedSha256: options.expectedSha256,
       finalObjectKey: objectKey,
       bucket: "nimbus-test",
+      uploadType: options.uploadType ?? "single_part",
+      chunkSizeBytes: options.chunkSizeBytes,
+      multipartUploadId: options.multipartUploadId,
+      receivedBytes: 0n,
       status: "completing",
       correlationId: `corr-${slug}`,
       expiresAt: new Date(Date.now() + 60_000),
@@ -481,6 +740,43 @@ async function createUploadFixture(
     plannedVersionId,
     objectKey,
   };
+}
+
+async function createUploadChunks(
+  fixture: UploadFixture,
+  chunks: Array<{ partNumber: number; sizeBytes: bigint; etag: string }>,
+) {
+  const uploadSession = await prisma.uploadSession.findUniqueOrThrow({
+    where: {
+      id: fixture.uploadSessionId,
+    },
+  });
+
+  await Promise.all(
+    chunks.map((chunk) =>
+      prisma.uploadChunk.create({
+        data: {
+          uploadSessionId: fixture.uploadSessionId,
+          ownerId: fixture.userId,
+          partNumber: chunk.partNumber,
+          sizeBytes: chunk.sizeBytes,
+          etag: chunk.etag,
+          status: "uploaded",
+        },
+      }),
+    ),
+  );
+  await prisma.uploadSession.update({
+    where: {
+      id: fixture.uploadSessionId,
+    },
+    data: {
+      receivedBytes: chunks.reduce((total, chunk) => total + chunk.sizeBytes, 0n),
+      uploadType: "multipart",
+      chunkSizeBytes: uploadSession.chunkSizeBytes ?? 8n,
+      multipartUploadId: uploadSession.multipartUploadId ?? `multipart-${fixture.uploadSessionId}`,
+    },
+  });
 }
 
 async function expectTerminalFailure(

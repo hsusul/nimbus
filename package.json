@@ -16,7 +16,8 @@
     "format:check": "prettier --check .",
     "db:generate": "pnpm --filter @nimbus/db db:generate",
     "db:migrate": "DATABASE_URL=${DATABASE_URL:-postgresql://nimbus:nimbus@localhost:5432/nimbus?schema=public} pnpm --filter @nimbus/db db:migrate",
-    "db:deploy": "DATABASE_URL=${DATABASE_URL:-postgresql://nimbus:nimbus@localhost:5432/nimbus?schema=public} pnpm --filter @nimbus/db db:deploy"
+    "db:deploy": "DATABASE_URL=${DATABASE_URL:-postgresql://nimbus:nimbus@localhost:5432/nimbus?schema=public} pnpm --filter @nimbus/db db:deploy",
+    "smoke:minio:multipart": "tsx scripts/minio-multipart-smoke.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
