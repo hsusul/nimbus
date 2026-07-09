@@ -188,7 +188,9 @@ async function expireSessionIfNeeded(
   }
 
   return prisma.$transaction(async (tx) => {
-    await markUploadExpired(tx, session.id, session.targetFileId);
+    await markUploadExpired(tx, session.id, session.targetFileId, {
+      failTargetFile: session.uploadMode === "new_file",
+    });
 
     return tx.uploadSession.findUniqueOrThrow({
       where: {

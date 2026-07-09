@@ -42,6 +42,19 @@ export const FileSchema = z.object({
   updatedAt: z.string(),
 });
 
+export const FileVersionSchema = z.object({
+  versionId: z.string(),
+  fileId: z.string(),
+  versionNumber: z.number().int().positive(),
+  sizeBytes: z.string(),
+  mimeType: z.string(),
+  contentHash: z.string().nullable(),
+  createdAt: z.string(),
+  createdById: z.string(),
+  processingStatus: z.string(),
+  isCurrent: z.boolean(),
+});
+
 export const FileResponseSchema = z.object({
   data: FileSchema,
 });
@@ -53,8 +66,25 @@ export const FileListResponseSchema = z.object({
   }),
 });
 
+export const FileVersionsListResponseSchema = z.object({
+  data: z.object({
+    versions: z.array(FileVersionSchema),
+    pageInfo: PageInfoSchema,
+  }),
+});
+
+export const RestoreFileVersionResponseSchema = z.object({
+  data: z.object({
+    file: FileSchema,
+    currentVersion: FileVersionSchema,
+  }),
+});
+
 export type FileCreateRequest = z.infer<typeof FileCreateRequestSchema>;
 export type FileUpdateRequest = z.infer<typeof FileUpdateRequestSchema>;
 export type FileMoveRequest = z.infer<typeof FileMoveRequestSchema>;
+export type FileVersion = z.infer<typeof FileVersionSchema>;
 export type FileResponse = z.infer<typeof FileResponseSchema>;
 export type FileListResponse = z.infer<typeof FileListResponseSchema>;
+export type FileVersionsListResponse = z.infer<typeof FileVersionsListResponseSchema>;
+export type RestoreFileVersionResponse = z.infer<typeof RestoreFileVersionResponseSchema>;

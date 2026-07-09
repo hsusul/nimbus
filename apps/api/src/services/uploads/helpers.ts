@@ -75,7 +75,10 @@ export async function markUploadExpired(
   tx: TransactionClient,
   uploadSessionId: string,
   targetFileId: string | null,
+  options: { failTargetFile?: boolean } = {},
 ) {
+  const failTargetFile = options.failTargetFile ?? true;
+
   await tx.uploadSession.update({
     where: {
       id: uploadSessionId,
@@ -86,7 +89,7 @@ export async function markUploadExpired(
     },
   });
 
-  if (targetFileId) {
+  if (targetFileId && failTargetFile) {
     await tx.file.update({
       where: {
         id: targetFileId,

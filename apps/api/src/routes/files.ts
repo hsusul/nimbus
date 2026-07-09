@@ -11,6 +11,7 @@ import { z } from "zod";
 import type { DownloadService } from "../services/downloads";
 import type { FileService } from "../services/files";
 import type { UserService } from "../services/users";
+import type { VersionService } from "../services/versions";
 import { getAuditContext, requireActiveInternalUser } from "./route-context";
 
 const FileListQuerySchema = CursorPaginationQuerySchema.extend({
@@ -21,6 +22,7 @@ export function filesRouter(
   fileService: FileService,
   userService: UserService,
   downloadService: DownloadService,
+  versionService: VersionService,
 ): Router {
   const router = createRouter();
 
@@ -65,6 +67,41 @@ export function filesRouter(
 
       res.json({
         data: download,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/api/v1/files/:fileId/versions", async (req, res, next) => {
+    try {
+      const actor = await requireActiveInternalUser(req, userService);
+      const query = CursorPaginationQuerySchema.parse(req.query);
+      const page = await versionService.listVersions(actor, req.params.fileId, query);
+
+      res.json({
+        data: {
+          versions: page.items,
+          pageInfo: page.pageInfo,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/api/v1/files/:fileId/versions/:versionId/restore", async (req, res, next) => {
+    try {
+      const actor = await requireActiveInternalUser(req, userService);
+      const restored = await versionService.restoreVersion(
+        actor,
+        req.params.fileId,
+        req.params.versionId,
+        getAuditContext(req, actor.id),
+      );
+
+      res.json({
+        data: restored,
       });
     } catch (error) {
       next(error);

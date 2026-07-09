@@ -1,5 +1,5 @@
 import type { UploadStartRequest } from "@nimbus/contracts";
-import { getPrismaClient, type PrismaClient } from "@nimbus/db";
+import { getPrismaClient, Prisma, type PrismaClient } from "@nimbus/db";
 import { buildVersionObjectKey, type ObjectStorageProvider } from "@nimbus/storage";
 import { randomUUID } from "node:crypto";
 
@@ -15,6 +15,8 @@ import {
 } from "./helpers";
 import { chooseUploadPlan } from "./multipart-plan";
 
+type TransactionClient = Prisma.TransactionClient;
+
 export interface UploadServiceOptions {
   bucket: string;
   maxFileSizeBytes: number;
@@ -27,6 +29,7 @@ export interface UploadServiceOptions {
 export interface UploadStartResult {
   uploadSessionId: string;
   fileId: string;
+  uploadMode: "new_file" | "new_version";
   status: string;
   uploadType: "single_part" | "multipart";
   expiresAt: string;
@@ -58,7 +61,7 @@ export async function startUpload(
   options: UploadServiceOptions,
   prisma: PrismaClient = getPrismaClient(),
 ): Promise<UploadStartResult> {
-  const name = normalizeResourceName(input.filename);
+  const uploadMode = input.uploadMode;
   const totalSizeBytes = parseSizeBytes(input.totalSizeBytes);
   const requestedChunkSizeBytes =
     input.chunkSizeBytes === undefined ? undefined : parseSizeBytes(input.chunkSizeBytes);
@@ -88,7 +91,12 @@ export async function startUpload(
     throw new HttpError(400, message, "Multipart upload plan is invalid.");
   }
 
-  const fileId = randomUUID();
+  const fileId = uploadMode === "new_version" ? input.targetFileId : randomUUID();
+
+  if (!fileId) {
+    throw new HttpError(400, "target_file_required", "targetFileId is required.");
+  }
+
   const uploadSessionId = randomUUID();
   const plannedVersionId = randomUUID();
   const finalObjectKey = buildVersionObjectKey({
@@ -100,66 +108,110 @@ export async function startUpload(
   const correlationId = getCorrelationId(auditContext);
 
   const uploadSession = await prisma.$transaction(async (tx) => {
-    await getActiveFolder(tx, actor.id, input.folderId);
-    await assertFileNameAvailable(tx, actor.id, input.folderId, name.normalizedName);
+    if (uploadMode === "new_file") {
+      if (!input.folderId || !input.filename) {
+        throw new HttpError(
+          400,
+          "new_file_upload_target_required",
+          "folderId and filename are required for new file uploads.",
+        );
+      }
 
-    const file = await tx.file.create({
-      data: {
-        id: fileId,
+      const name = normalizeResourceName(input.filename);
+
+      await getActiveFolder(tx, actor.id, input.folderId);
+      await assertFileNameAvailable(tx, actor.id, input.folderId, name.normalizedName);
+
+      const file = await tx.file.create({
+        data: {
+          id: fileId,
+          ownerId: actor.id,
+          folderId: input.folderId,
+          name: name.name,
+          normalizedName: name.normalizedName,
+          extension: name.extension,
+          mimeType: input.mimeType,
+          status: "uploading",
+          sizeBytes: totalSizeBytes,
+          contentHash: expectedSha256 ?? null,
+        },
+      });
+      const session = await createUploadSession(tx, {
+        uploadSessionId,
         ownerId: actor.id,
-        folderId: input.folderId,
-        name: name.name,
-        normalizedName: name.normalizedName,
-        extension: name.extension,
-        mimeType: input.mimeType,
-        status: "uploading",
-        sizeBytes: totalSizeBytes,
-        contentHash: expectedSha256 ?? null,
-      },
-    });
-    const session = await tx.uploadSession.create({
-      data: {
-        id: uploadSessionId,
-        ownerId: actor.id,
-        targetFolderId: input.folderId,
+        targetFolderId: file.folderId,
         targetFileId: file.id,
         plannedVersionId,
-        uploadMode: "new_file",
-        filename: name.name,
+        uploadMode,
+        filename: file.name,
         mimeType: input.mimeType,
         totalSizeBytes,
-        expectedSha256: expectedSha256 ?? null,
+        expectedSha256,
         finalObjectKey,
         bucket: options.bucket,
         uploadType: uploadPlan.uploadType,
         chunkSizeBytes: uploadPlan.chunkSizeBytes,
-        receivedBytes: 0n,
-        status: "created",
         correlationId,
         expiresAt,
-      },
-    });
+      });
 
-    await appendAuditLog(tx, {
-      ...auditContext,
-      correlationId,
-      action: "upload.started",
-      resourceType: "upload_session",
-      resourceId: session.id,
-      metadata: {
+      await writeUploadStartedAudit(tx, auditContext, correlationId, session, {
         fileId: file.id,
         folderId: file.folderId,
         filename: file.name,
         sizeBytes: file.sizeBytes.toString(),
-        uploadMode: session.uploadMode,
-        uploadType: session.uploadType,
-        chunkSizeBytes: session.chunkSizeBytes?.toString() ?? null,
         partCount: uploadPlan.partCount,
+      });
+
+      return session;
+    }
+
+    const targetFile = await tx.file.findFirst({
+      where: {
+        id: fileId,
+        ownerId: actor.id,
+        status: "active",
+        deletedAt: null,
       },
+    });
+
+    if (!targetFile) {
+      throw new HttpError(404, "file_not_found", "File was not found.");
+    }
+
+    const session = await createUploadSession(tx, {
+      uploadSessionId,
+      ownerId: actor.id,
+      targetFolderId: targetFile.folderId,
+      targetFileId: targetFile.id,
+      plannedVersionId,
+      uploadMode,
+      filename: targetFile.name,
+      mimeType: input.mimeType,
+      totalSizeBytes,
+      expectedSha256,
+      finalObjectKey,
+      bucket: options.bucket,
+      uploadType: uploadPlan.uploadType,
+      chunkSizeBytes: uploadPlan.chunkSizeBytes,
+      correlationId,
+      expiresAt,
+    });
+
+    await writeUploadStartedAudit(tx, auditContext, correlationId, session, {
+      fileId: targetFile.id,
+      folderId: targetFile.folderId,
+      filename: targetFile.name,
+      sizeBytes: totalSizeBytes.toString(),
+      partCount: uploadPlan.partCount,
     });
 
     return session;
   });
+
+  if (!uploadSession.targetFileId) {
+    throw new HttpError(500, "upload_session_invalid", "Upload session is missing a file target.");
+  }
 
   if (uploadPlan.uploadType === "multipart") {
     const chunkSizeBytes = uploadPlan.chunkSizeBytes;
@@ -189,7 +241,13 @@ export async function startUpload(
         },
       });
     } catch (error) {
-      await markStartUploadFailed(prisma, uploadSession.id, fileId, "multipart_create_failed");
+      await markStartUploadFailed(
+        prisma,
+        uploadSession.id,
+        uploadSession.targetFileId,
+        "multipart_create_failed",
+        uploadSession.uploadMode === "new_file",
+      );
       throw error;
     }
 
@@ -217,7 +275,8 @@ export async function startUpload(
 
     return {
       uploadSessionId: uploadSession.id,
-      fileId,
+      fileId: uploadSession.targetFileId,
+      uploadMode: uploadSession.uploadMode === "new_version" ? "new_version" : "new_file",
       status: uploadSession.status,
       uploadType: "multipart",
       expiresAt: uploadSession.expiresAt.toISOString(),
@@ -247,7 +306,8 @@ export async function startUpload(
 
   return {
     uploadSessionId: uploadSession.id,
-    fileId,
+    fileId: uploadSession.targetFileId,
+    uploadMode: uploadSession.uploadMode === "new_version" ? "new_version" : "new_file",
     status: uploadSession.status,
     uploadType: "single_part",
     expiresAt: uploadSession.expiresAt.toISOString(),
@@ -258,6 +318,88 @@ export async function startUpload(
       headers,
     },
   };
+}
+
+async function createUploadSession(
+  tx: TransactionClient,
+  input: {
+    uploadSessionId: string;
+    ownerId: string;
+    targetFolderId: string;
+    targetFileId: string;
+    plannedVersionId: string;
+    uploadMode: "new_file" | "new_version";
+    filename: string;
+    mimeType: string;
+    totalSizeBytes: bigint;
+    expectedSha256?: string | null;
+    finalObjectKey: string;
+    bucket: string;
+    uploadType: "single_part" | "multipart";
+    chunkSizeBytes: bigint | null;
+    correlationId: string;
+    expiresAt: Date;
+  },
+) {
+  return tx.uploadSession.create({
+    data: {
+      id: input.uploadSessionId,
+      ownerId: input.ownerId,
+      targetFolderId: input.targetFolderId,
+      targetFileId: input.targetFileId,
+      plannedVersionId: input.plannedVersionId,
+      uploadMode: input.uploadMode,
+      filename: input.filename,
+      mimeType: input.mimeType,
+      totalSizeBytes: input.totalSizeBytes,
+      expectedSha256: input.expectedSha256 ?? null,
+      finalObjectKey: input.finalObjectKey,
+      bucket: input.bucket,
+      uploadType: input.uploadType,
+      chunkSizeBytes: input.chunkSizeBytes,
+      receivedBytes: 0n,
+      status: "created",
+      correlationId: input.correlationId,
+      expiresAt: input.expiresAt,
+    },
+  });
+}
+
+async function writeUploadStartedAudit(
+  tx: TransactionClient,
+  auditContext: AuditContext,
+  correlationId: string,
+  session: {
+    id: string;
+    uploadMode: string;
+    uploadType: string;
+    chunkSizeBytes: bigint | null;
+  },
+  metadata: {
+    fileId: string;
+    folderId: string;
+    filename: string;
+    sizeBytes: string;
+    partCount: number;
+  },
+) {
+  await appendAuditLog(tx, {
+    ...auditContext,
+    correlationId,
+    action: "upload.started",
+    resourceType: "upload_session",
+    resourceId: session.id,
+    metadata: {
+      fileId: metadata.fileId,
+      folderId: metadata.folderId,
+      filename: metadata.filename,
+      sizeBytes: metadata.sizeBytes,
+      uploadMode: session.uploadMode,
+      uploadType: session.uploadType,
+      chunkSizeBytes: session.chunkSizeBytes?.toString() ?? null,
+      partCount: metadata.partCount,
+    },
+  });
 }
 
 function getPartSizeForResponse(
@@ -280,6 +422,7 @@ async function markStartUploadFailed(
   uploadSessionId: string,
   fileId: string,
   failureReason: string,
+  failTargetFile: boolean,
 ) {
   await prisma.$transaction(async (tx) => {
     await tx.uploadSession.update({
@@ -291,13 +434,16 @@ async function markStartUploadFailed(
         failureReason,
       },
     });
-    await tx.file.update({
-      where: {
-        id: fileId,
-      },
-      data: {
-        status: "failed",
-      },
-    });
+
+    if (failTargetFile) {
+      await tx.file.update({
+        where: {
+          id: fileId,
+        },
+        data: {
+          status: "failed",
+        },
+      });
+    }
   });
 }

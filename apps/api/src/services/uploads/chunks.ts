@@ -42,7 +42,9 @@ export async function registerUploadChunk(
 
   if (session.expiresAt.getTime() <= Date.now()) {
     await prisma.$transaction(async (tx) => {
-      await markUploadExpired(tx, session.id, session.targetFileId);
+      await markUploadExpired(tx, session.id, session.targetFileId, {
+        failTargetFile: session.uploadMode === "new_file",
+      });
     });
     throw new HttpError(410, "upload_session_expired", "Upload session has expired.");
   }

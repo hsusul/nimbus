@@ -131,6 +131,13 @@ interface UploadFixture {
   objectKey: string;
 }
 
+interface NewVersionUploadFixture extends UploadFixture {
+  folderId: string;
+  previousVersionId: string;
+  previousSizeBytes: bigint;
+  previousMimeType: string;
+}
+
 async function cleanupRunData() {
   const users = await prisma.user.findMany({
     where: {
@@ -355,6 +362,136 @@ describe.sequential("upload finalization worker", () => {
     expect(file.currentVersionId).toBe(fixture.plannedVersionId);
   });
 
+  it("finalizes a single-part new_version upload for an existing active file", async () => {
+    const fixture = await createNewVersionUploadFixture("new-version-success", {
+      totalSizeBytes: 9n,
+      mimeType: "text/markdown",
+      expectedSha256: "sha-new-version",
+    });
+
+    storage.putObject({
+      bucket: "nimbus-test",
+      objectKey: fixture.objectKey,
+      sizeBytes: 9n,
+      contentType: "text/markdown",
+      sha256: "sha-new-version",
+    });
+
+    await finalizeUploadSession(
+      {
+        uploadSessionId: fixture.uploadSessionId,
+        backgroundJobId: fixture.backgroundJobId,
+        correlationId: "corr-new-version-success",
+      },
+      { prisma, storage },
+    );
+
+    const [file, versions, auditLog, uploadSession] = await Promise.all([
+      prisma.file.findUniqueOrThrow({
+        where: {
+          id: fixture.fileId,
+        },
+      }),
+      prisma.fileVersion.findMany({
+        where: {
+          fileId: fixture.fileId,
+        },
+        orderBy: {
+          versionNumber: "asc",
+        },
+      }),
+      prisma.auditLog.findFirstOrThrow({
+        where: {
+          actorUserId: fixture.userId,
+          action: "file.version_uploaded",
+        },
+      }),
+      prisma.uploadSession.findUniqueOrThrow({
+        where: {
+          id: fixture.uploadSessionId,
+        },
+      }),
+    ]);
+
+    expect(file).toMatchObject({
+      status: "active",
+      folderId: fixture.folderId,
+      name: "new-version-success.txt",
+      currentVersionId: fixture.plannedVersionId,
+      mimeType: "text/markdown",
+      contentHash: "sha-new-version",
+    });
+    expect(file.sizeBytes).toBe(9n);
+    expect(versions.map((version) => version.versionNumber)).toEqual([1, 2]);
+    expect(versions[1]).toMatchObject({
+      id: fixture.plannedVersionId,
+      uploadSessionId: fixture.uploadSessionId,
+      processingStatus: "available",
+    });
+    expect(uploadSession.status).toBe("completed");
+    expect(auditLog).toMatchObject({
+      resourceType: "file",
+      resourceId: fixture.fileId,
+      requestId: "corr-new-version-success",
+    });
+    expect(JSON.stringify(auditLog)).not.toContain(fixture.objectKey);
+  });
+
+  it("does not create duplicate file versions on duplicate new_version worker execution", async () => {
+    const fixture = await createNewVersionUploadFixture("new-version-duplicate", {
+      totalSizeBytes: 6n,
+    });
+
+    storage.putObject({
+      bucket: "nimbus-test",
+      objectKey: fixture.objectKey,
+      sizeBytes: 6n,
+      contentType: "text/plain",
+    });
+
+    await finalizeUploadSession(
+      {
+        uploadSessionId: fixture.uploadSessionId,
+        backgroundJobId: fixture.backgroundJobId,
+        correlationId: "corr-new-version-duplicate",
+      },
+      { prisma, storage },
+    );
+    await finalizeUploadSession(
+      {
+        uploadSessionId: fixture.uploadSessionId,
+        backgroundJobId: fixture.backgroundJobId,
+        correlationId: "corr-new-version-duplicate",
+      },
+      { prisma, storage },
+    );
+
+    const [fileVersionCount, allVersions, file] = await Promise.all([
+      prisma.fileVersion.count({
+        where: {
+          uploadSessionId: fixture.uploadSessionId,
+        },
+      }),
+      prisma.fileVersion.findMany({
+        where: {
+          fileId: fixture.fileId,
+        },
+        orderBy: {
+          versionNumber: "asc",
+        },
+      }),
+      prisma.file.findUniqueOrThrow({
+        where: {
+          id: fixture.fileId,
+        },
+      }),
+    ]);
+
+    expect(fileVersionCount).toBe(1);
+    expect(allVersions.map((version) => version.versionNumber)).toEqual([1, 2]);
+    expect(file.currentVersionId).toBe(fixture.plannedVersionId);
+  });
+
   it("marks missing objects as terminal upload failures", async () => {
     const fixture = await createUploadFixture("missing-object", {
       totalSizeBytes: 5n,
@@ -534,6 +671,68 @@ describe.sequential("upload finalization worker", () => {
     expect(versions).toHaveLength(1);
   });
 
+  it("finalizes multipart new_version uploads for an existing active file", async () => {
+    const fixture = await createNewVersionUploadFixture("new-version-multipart", {
+      totalSizeBytes: 20n,
+      expectedSha256: "sha-new-version-multipart",
+      uploadType: "multipart",
+      chunkSizeBytes: 8n,
+      multipartUploadId: "new-version-multipart-upload",
+    });
+
+    await createUploadChunks(fixture, [
+      { partNumber: 2, sizeBytes: 8n, etag: "etag-2" },
+      { partNumber: 1, sizeBytes: 8n, etag: "etag-1" },
+      { partNumber: 3, sizeBytes: 4n, etag: "etag-3" },
+    ]);
+    storage.stageMultipartObject({
+      bucket: "nimbus-test",
+      objectKey: fixture.objectKey,
+      sizeBytes: 20n,
+      contentType: "text/plain",
+      sha256: "sha-new-version-multipart",
+    });
+
+    await finalizeUploadSession(
+      {
+        uploadSessionId: fixture.uploadSessionId,
+        backgroundJobId: fixture.backgroundJobId,
+        correlationId: "corr-new-version-multipart",
+      },
+      { prisma, storage },
+    );
+
+    const [file, versions] = await Promise.all([
+      prisma.file.findUniqueOrThrow({
+        where: {
+          id: fixture.fileId,
+        },
+      }),
+      prisma.fileVersion.findMany({
+        where: {
+          fileId: fixture.fileId,
+        },
+        orderBy: {
+          versionNumber: "asc",
+        },
+      }),
+    ]);
+    const completed = storage.completedMultipartUploads.at(-1);
+
+    expect(completed?.parts).toEqual([
+      { partNumber: 1, etag: "etag-1" },
+      { partNumber: 2, etag: "etag-2" },
+      { partNumber: 3, etag: "etag-3" },
+    ]);
+    expect(file).toMatchObject({
+      status: "active",
+      currentVersionId: fixture.plannedVersionId,
+      contentHash: "sha-new-version-multipart",
+    });
+    expect(file.sizeBytes).toBe(20n);
+    expect(versions.map((version) => version.versionNumber)).toEqual([1, 2]);
+  });
+
   it("does not create duplicate versions for duplicate multipart worker execution", async () => {
     const fixture = await createUploadFixture("multipart-duplicate", {
       totalSizeBytes: 12n,
@@ -608,6 +807,60 @@ describe.sequential("upload finalization worker", () => {
     );
 
     await expectTerminalFailure(fixture, "size_mismatch", "corr-multipart-size-mismatch");
+  });
+
+  it("does not update currentVersionId when new_version finalization fails terminally", async () => {
+    const fixture = await createNewVersionUploadFixture("new-version-missing-object", {
+      totalSizeBytes: 6n,
+    });
+
+    await finalizeUploadSession(
+      {
+        uploadSessionId: fixture.uploadSessionId,
+        backgroundJobId: fixture.backgroundJobId,
+        correlationId: "corr-new-version-missing",
+      },
+      { prisma, storage },
+    );
+
+    const [file, uploadSession, backgroundJob, versionCount] = await Promise.all([
+      prisma.file.findUniqueOrThrow({
+        where: {
+          id: fixture.fileId,
+        },
+      }),
+      prisma.uploadSession.findUniqueOrThrow({
+        where: {
+          id: fixture.uploadSessionId,
+        },
+      }),
+      prisma.backgroundJob.findUniqueOrThrow({
+        where: {
+          id: fixture.backgroundJobId,
+        },
+      }),
+      prisma.fileVersion.count({
+        where: {
+          uploadSessionId: fixture.uploadSessionId,
+        },
+      }),
+    ]);
+
+    expect(file).toMatchObject({
+      status: "active",
+      currentVersionId: fixture.previousVersionId,
+      mimeType: fixture.previousMimeType,
+    });
+    expect(file.sizeBytes).toBe(fixture.previousSizeBytes);
+    expect(uploadSession).toMatchObject({
+      status: "failed",
+      failureReason: "object_missing",
+    });
+    expect(backgroundJob).toMatchObject({
+      status: "failed",
+      lastError: "object_missing",
+    });
+    expect(versionCount).toBe(0);
   });
 
   it("throws transient multipart storage errors for BullMQ retry", async () => {
@@ -739,6 +992,136 @@ async function createUploadFixture(
     backgroundJobId: backgroundJob.id,
     plannedVersionId,
     objectKey,
+  };
+}
+
+async function createNewVersionUploadFixture(
+  slug: string,
+  options: {
+    totalSizeBytes: bigint;
+    expectedSha256?: string;
+    mimeType?: string;
+    uploadType?: "single_part" | "multipart";
+    chunkSizeBytes?: bigint;
+    multipartUploadId?: string;
+  },
+): Promise<NewVersionUploadFixture> {
+  const user = await prisma.user.create({
+    data: {
+      authSubject: `${runId}-${slug}`,
+      email: `${slug}@${runId}.nimbus.test`,
+      displayName: slug,
+    },
+  });
+  const folder = await prisma.folder.create({
+    data: {
+      ownerId: user.id,
+      name: "Root",
+      normalizedName: "root",
+      depth: 0,
+    },
+  });
+  const file = await prisma.file.create({
+    data: {
+      ownerId: user.id,
+      folderId: folder.id,
+      name: `${slug}.txt`,
+      normalizedName: `${slug}.txt`,
+      extension: "txt",
+      mimeType: "text/plain",
+      status: "active",
+      sizeBytes: 4n,
+    },
+  });
+  const previousVersionId = randomUUID();
+  const previousUploadSession = await prisma.uploadSession.create({
+    data: {
+      ownerId: user.id,
+      targetFolderId: folder.id,
+      targetFileId: file.id,
+      plannedVersionId: previousVersionId,
+      uploadMode: "new_file",
+      filename: file.name,
+      mimeType: "text/plain",
+      totalSizeBytes: 4n,
+      finalObjectKey: `objects/${user.id}/${file.id}/versions/${previousVersionId}/content`,
+      bucket: "nimbus-test",
+      status: "completed",
+      expiresAt: new Date(Date.now() + 60_000),
+      completedAt: new Date(),
+    },
+  });
+  await prisma.fileVersion.create({
+    data: {
+      id: previousVersionId,
+      fileId: file.id,
+      versionNumber: 1,
+      storageProvider: "s3-compatible",
+      bucket: previousUploadSession.bucket,
+      objectKey: previousUploadSession.finalObjectKey,
+      sizeBytes: previousUploadSession.totalSizeBytes,
+      mimeType: previousUploadSession.mimeType,
+      uploadSessionId: previousUploadSession.id,
+      createdById: user.id,
+      processingStatus: "available",
+    },
+  });
+  await prisma.file.update({
+    where: {
+      id: file.id,
+    },
+    data: {
+      currentVersionId: previousVersionId,
+    },
+  });
+
+  const plannedVersionId = randomUUID();
+  const objectKey = `objects/${user.id}/${file.id}/versions/${plannedVersionId}/content`;
+  const uploadSession = await prisma.uploadSession.create({
+    data: {
+      ownerId: user.id,
+      targetFolderId: folder.id,
+      targetFileId: file.id,
+      plannedVersionId,
+      uploadMode: "new_version",
+      filename: file.name,
+      mimeType: options.mimeType ?? "text/plain",
+      totalSizeBytes: options.totalSizeBytes,
+      expectedSha256: options.expectedSha256,
+      finalObjectKey: objectKey,
+      bucket: "nimbus-test",
+      uploadType: options.uploadType ?? "single_part",
+      chunkSizeBytes: options.chunkSizeBytes,
+      multipartUploadId: options.multipartUploadId,
+      receivedBytes: 0n,
+      status: "completing",
+      correlationId: `corr-${slug}`,
+      expiresAt: new Date(Date.now() + 60_000),
+    },
+  });
+  const backgroundJob = await prisma.backgroundJob.create({
+    data: {
+      queueName: UPLOAD_FINALIZATION_QUEUE_NAME,
+      resourceType: "upload_session",
+      resourceId: uploadSession.id,
+      status: "queued",
+      attempts: 0,
+      maxAttempts: 3,
+      correlationId: uploadSession.correlationId,
+    },
+  });
+
+  return {
+    userId: user.id,
+    fileId: file.id,
+    folderId: folder.id,
+    uploadSessionId: uploadSession.id,
+    backgroundJobId: backgroundJob.id,
+    plannedVersionId,
+    objectKey,
+    previousVersionId,
+    previousSizeBytes: 4n,
+    previousMimeType: "text/plain",
   };
 }
 

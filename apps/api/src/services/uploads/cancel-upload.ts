@@ -50,7 +50,9 @@ export async function cancelUpload(
 
   if (session.expiresAt.getTime() <= Date.now()) {
     await prisma.$transaction(async (tx) => {
-      await markUploadExpired(tx, session.id, session.targetFileId);
+      await markUploadExpired(tx, session.id, session.targetFileId, {
+        failTargetFile: session.uploadMode === "new_file",
+      });
     });
     throw new HttpError(410, "upload_session_expired", "Upload session has expired.");
   }
@@ -67,7 +69,7 @@ export async function cancelUpload(
       },
     });
 
-    if (session.targetFileId) {
+    if (session.targetFileId && session.uploadMode === "new_file") {
       await tx.file.update({
         where: {
           id: session.targetFileId,

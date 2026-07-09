@@ -12,22 +12,80 @@ export const UploadSessionStatusSchema = z.enum([
 
 export const UploadTypeSchema = z.enum(["single_part", "multipart"]);
 
+export const UploadModeSchema = z.enum(["new_file", "new_version"]);
+
 export const UploadChunkStatusSchema = z.enum(["uploaded", "verified", "rejected"]);
 
 export const SizeBytesSchema = z.union([z.string().regex(/^\d+$/), z.number().int().nonnegative()]);
 
-export const UploadStartRequestSchema = z.object({
-  folderId: z.string().min(1),
-  filename: z.string().min(1).max(255),
-  mimeType: z.string().min(1).max(255),
-  totalSizeBytes: SizeBytesSchema,
-  expectedSha256: z
-    .string()
-    .regex(/^[a-fA-F0-9]{64}$/)
-    .optional(),
-  uploadType: UploadTypeSchema.optional(),
-  chunkSizeBytes: SizeBytesSchema.optional(),
-});
+export const UploadStartRequestSchema = z
+  .object({
+    uploadMode: UploadModeSchema.default("new_file"),
+    targetFileId: z.string().min(1).optional(),
+    folderId: z.string().min(1).optional(),
+    filename: z.string().min(1).max(255).optional(),
+    mimeType: z.string().min(1).max(255),
+    totalSizeBytes: SizeBytesSchema,
+    expectedSha256: z
+      .string()
+      .regex(/^[a-fA-F0-9]{64}$/)
+      .optional(),
+    uploadType: UploadTypeSchema.optional(),
+    chunkSizeBytes: SizeBytesSchema.optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.uploadMode === "new_file") {
+      if (!value.folderId) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["folderId"],
+          message: "folderId is required for new file uploads.",
+        });
+      }
+
+      if (!value.filename) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["filename"],
+          message: "filename is required for new file uploads.",
+        });
+      }
+
+      if (value.targetFileId) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["targetFileId"],
+          message: "targetFileId is only supported for new version uploads.",
+        });
+      }
+
+      return;
+    }
+
+    if (!value.targetFileId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["targetFileId"],
+        message: "targetFileId is required for new version uploads.",
+      });
+    }
+
+    if (value.folderId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["folderId"],
+        message: "folderId is not supported for new version uploads.",
+      });
+    }
+
+    if (value.filename) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["filename"],
+        message: "filename is not supported for new version uploads.",
+      });
+    }
+  });
 
 export const SignedUploadPartSchema = z.object({
   partNumber: z.number().int().positive(),
@@ -53,6 +111,7 @@ export const UploadStartResponseSchema = z.object({
   data: z.object({
     uploadSessionId: z.string(),
     fileId: z.string(),
+    uploadMode: UploadModeSchema,
     status: UploadSessionStatusSchema,
     uploadType: UploadTypeSchema,
     expiresAt: z.string(),
@@ -142,6 +201,7 @@ export const UploadCancelResponseSchema = z.object({
 
 export type UploadSessionStatus = z.infer<typeof UploadSessionStatusSchema>;
 export type UploadType = z.infer<typeof UploadTypeSchema>;
+export type UploadMode = z.infer<typeof UploadModeSchema>;
 export type UploadChunkStatus = z.infer<typeof UploadChunkStatusSchema>;
 export type UploadStartRequest = z.infer<typeof UploadStartRequestSchema>;
 export type UploadStartResponse = z.infer<typeof UploadStartResponseSchema>;

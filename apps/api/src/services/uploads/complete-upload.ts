@@ -70,7 +70,9 @@ export async function enqueueUploadCompletion(
 
   if (existingSession.expiresAt.getTime() <= Date.now()) {
     await prisma.$transaction(async (tx) => {
-      await markUploadExpired(tx, existingSession.id, existingSession.targetFileId);
+      await markUploadExpired(tx, existingSession.id, existingSession.targetFileId, {
+        failTargetFile: existingSession.uploadMode === "new_file",
+      });
     });
     throw new HttpError(410, "upload_session_expired", "Upload session has expired.");
   }

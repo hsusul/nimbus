@@ -37,6 +37,7 @@ export async function finalizeUploadSession(
 
   const correlationId =
     uploadSession.correlationId ?? parsed.correlationId ?? `job:${parsed.backgroundJobId}`;
+  const failTargetFile = uploadSession.uploadMode === "new_file";
 
   if (uploadSession.status === "completed") {
     await markJobSucceeded(prisma, parsed.backgroundJobId, correlationId);
@@ -71,6 +72,9 @@ export async function finalizeUploadSession(
       null,
       "missing_target_file",
       correlationId,
+      {
+        failTargetFile: false,
+      },
     );
     return;
   }
@@ -89,6 +93,7 @@ export async function finalizeUploadSession(
       uploadSession.targetFileId,
       existingVersion.id,
       correlationId,
+      uploadSession.uploadMode,
     );
     return;
   }
@@ -108,6 +113,9 @@ export async function finalizeUploadSession(
         uploadSession.targetFileId,
         completed.failureReason,
         correlationId,
+        {
+          failTargetFile,
+        },
       );
       return;
     }
@@ -129,6 +137,9 @@ export async function finalizeUploadSession(
         uploadSession.targetFileId,
         "object_missing",
         correlationId,
+        {
+          failTargetFile,
+        },
       );
       return;
     }
@@ -146,6 +157,9 @@ export async function finalizeUploadSession(
       uploadSession.targetFileId,
       "size_mismatch",
       correlationId,
+      {
+        failTargetFile,
+      },
     );
     return;
   }
@@ -162,6 +176,9 @@ export async function finalizeUploadSession(
       uploadSession.targetFileId,
       "sha256_mismatch",
       correlationId,
+      {
+        failTargetFile,
+      },
     );
     return;
   }
@@ -209,6 +226,33 @@ export async function finalizeUploadSession(
 
     if (!lockedSession.targetFileId) {
       throw new Error("missing_target_file");
+    }
+
+    const targetFile = await lockAndGetTargetFile(tx, lockedSession.targetFileId);
+
+    if (!targetFile) {
+      await markUploadAndJobFailed(
+        tx,
+        parsed.backgroundJobId,
+        lockedSession.id,
+        "target_file_not_found",
+        correlationId,
+      );
+      return;
+    }
+
+    if (
+      lockedSession.uploadMode === "new_version" &&
+      (targetFile.status !== "active" || targetFile.deletedAt)
+    ) {
+      await markUploadAndJobFailed(
+        tx,
+        parsed.backgroundJobId,
+        lockedSession.id,
+        "target_file_not_available",
+        correlationId,
+      );
+      return;
     }
 
     const existingVersion = await tx.fileVersion.findUnique({
@@ -311,7 +355,8 @@ export async function finalizeUploadSession(
     await tx.auditLog.create({
       data: {
         actorUserId: lockedSession.ownerId,
-        action: "upload.completed",
+        action:
+          lockedSession.uploadMode === "new_version" ? "file.version_uploaded" : "upload.completed",
         resourceType: "file",
         resourceId: file.id,
         requestId: correlationId,
@@ -320,6 +365,8 @@ export async function finalizeUploadSession(
           uploadSessionId: lockedSession.id,
           backgroundJobId: parsed.backgroundJobId,
           fileVersionId: fileVersion.id,
+          uploadMode: lockedSession.uploadMode,
+          versionNumber: fileVersion.versionNumber,
           sizeBytes: fileVersion.sizeBytes.toString(),
         },
       },
@@ -392,8 +439,33 @@ async function completeWithExistingVersion(
   targetFileId: string,
   fileVersionId: string,
   correlationId: string,
+  uploadMode: string,
 ) {
   await prisma.$transaction(async (tx) => {
+    const targetFile = await lockAndGetTargetFile(tx, targetFileId);
+
+    if (!targetFile) {
+      await markUploadAndJobFailed(
+        tx,
+        backgroundJobId,
+        uploadSessionId,
+        "target_file_not_found",
+        correlationId,
+      );
+      return;
+    }
+
+    if (uploadMode === "new_version" && (targetFile.status !== "active" || targetFile.deletedAt)) {
+      await markUploadAndJobFailed(
+        tx,
+        backgroundJobId,
+        uploadSessionId,
+        "target_file_not_available",
+        correlationId,
+      );
+      return;
+    }
+
     const fileVersion = await tx.fileVersion.findUniqueOrThrow({
       where: {
         id: fileVersionId,
@@ -512,7 +584,10 @@ async function failUploadTerminal(
   targetFileId: string | null,
   failureReason: string,
   correlationId: string,
+  options: { failTargetFile?: boolean } = {},
 ) {
+  const failTargetFile = options.failTargetFile ?? true;
+
   await prisma.$transaction(async (tx) => {
     await tx.uploadSession.update({
       where: {
@@ -525,7 +600,7 @@ async function failUploadTerminal(
       },
     });
 
-    if (targetFileId) {
+    if (targetFileId && failTargetFile) {
       await tx.file.update({
         where: {
           id: targetFileId,
@@ -547,6 +622,52 @@ async function failUploadTerminal(
         completedAt: new Date(),
       },
     });
+  });
+}
+
+async function markUploadAndJobFailed(
+  tx: Prisma.TransactionClient,
+  backgroundJobId: string,
+  uploadSessionId: string,
+  failureReason: string,
+  correlationId: string,
+) {
+  await tx.uploadSession.update({
+    where: {
+      id: uploadSessionId,
+    },
+    data: {
+      status: "failed",
+      failureReason,
+      correlationId,
+    },
+  });
+  await tx.backgroundJob.update({
+    where: {
+      id: backgroundJobId,
+    },
+    data: {
+      status: "failed",
+      lastError: failureReason,
+      correlationId,
+      completedAt: new Date(),
+    },
+  });
+}
+
+async function lockAndGetTargetFile(tx: Prisma.TransactionClient, fileId: string) {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>(
+    Prisma.sql`SELECT id FROM "files" WHERE id = ${fileId} FOR UPDATE`,
+  );
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return tx.file.findUnique({
+    where: {
+      id: fileId,
+    },
   });
 }
 

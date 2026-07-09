@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   FileDownloadResponseSchema,
+  FileVersionsListResponseSchema,
   RegisterUploadChunkResponseSchema,
+  RestoreFileVersionResponseSchema,
   UploadCancelResponseSchema,
   UploadChunksResponseSchema,
   UploadCompleteResponseSchema,
+  UploadStartRequestSchema,
   UploadSessionDetailResponseSchema,
   UploadStartResponseSchema,
 } from "../src/index";
@@ -17,6 +20,7 @@ describe("M3 upload and download contracts", () => {
         data: {
           uploadSessionId: "upload_123",
           fileId: "file_123",
+          uploadMode: "new_file",
           status: "created",
           uploadType: "single_part",
           expiresAt: "2026-07-09T00:00:00.000Z",
@@ -39,6 +43,7 @@ describe("M3 upload and download contracts", () => {
         data: {
           uploadSessionId: "upload_123",
           fileId: "file_123",
+          uploadMode: "new_file",
           status: "created",
           uploadType: "multipart",
           expiresAt: "2026-07-09T00:00:00.000Z",
@@ -59,6 +64,28 @@ describe("M3 upload and download contracts", () => {
         },
       }),
     ).not.toThrow();
+  });
+
+  it("validates upload start requests for new versions", () => {
+    expect(() =>
+      UploadStartRequestSchema.parse({
+        uploadMode: "new_version",
+        targetFileId: "file_123",
+        mimeType: "text/plain",
+        totalSizeBytes: "12",
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      UploadStartRequestSchema.parse({
+        uploadMode: "new_version",
+        targetFileId: "file_123",
+        folderId: "folder_123",
+        filename: "renamed.txt",
+        mimeType: "text/plain",
+        totalSizeBytes: "12",
+      }),
+    ).toThrow();
   });
 
   it("validates upload session detail and chunk responses", () => {
@@ -153,6 +180,57 @@ describe("M3 upload and download contracts", () => {
           status: "canceled",
           abortedMultipartUpload: true,
           correlationId: "corr_123",
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("validates file version list and restore responses", () => {
+    const file = {
+      id: "file_123",
+      ownerId: "user_123",
+      folderId: "folder_123",
+      name: "report.txt",
+      extension: "txt",
+      mimeType: "text/plain",
+      status: "active",
+      sizeBytes: "12",
+      contentHash: "abc",
+      currentVersionId: "version_2",
+      deletedAt: null,
+      createdAt: "2026-07-09T00:00:00.000Z",
+      updatedAt: "2026-07-09T00:00:00.000Z",
+    };
+    const version = {
+      versionId: "version_2",
+      fileId: "file_123",
+      versionNumber: 2,
+      sizeBytes: "12",
+      mimeType: "text/plain",
+      contentHash: "abc",
+      createdAt: "2026-07-09T00:00:00.000Z",
+      createdById: "user_123",
+      processingStatus: "available",
+      isCurrent: true,
+    };
+
+    expect(() =>
+      FileVersionsListResponseSchema.parse({
+        data: {
+          versions: [version],
+          pageInfo: {
+            nextCursor: null,
+            hasMore: false,
+          },
+        },
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      RestoreFileVersionResponseSchema.parse({
+        data: {
+          file,
+          currentVersion: version,
         },
       }),
     ).not.toThrow();

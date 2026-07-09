@@ -24,6 +24,7 @@ import { BullMqUploadFinalizationQueue, type UploadFinalizationQueue } from "./s
 import { createReadinessChecker, type ReadinessChecker } from "./services/readiness";
 import { PrismaUploadService, type UploadService } from "./services/uploads";
 import { PrismaUserService, type UserService } from "./services/users";
+import { PrismaVersionService, type VersionService } from "./services/versions";
 
 export interface AppDependencies {
   config?: ApiConfig;
@@ -37,6 +38,7 @@ export interface AppDependencies {
   uploadFinalizationQueue?: UploadFinalizationQueue;
   uploadService?: UploadService;
   downloadService?: DownloadService;
+  versionService?: VersionService;
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
@@ -78,6 +80,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     new PrismaDownloadService(storageProvider, {
       signedDownloadUrlTtlSeconds: config.signedDownloadUrlTtlSeconds,
     });
+  const versionService = dependencies.versionService ?? new PrismaVersionService();
   const app = express();
 
   app.disable("x-powered-by");
@@ -102,7 +105,7 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use(meRouter(userService));
   app.use(foldersRouter(folderService, userService));
   app.use(uploadsRouter(uploadService, userService));
-  app.use(filesRouter(fileService, userService, downloadService));
+  app.use(filesRouter(fileService, userService, downloadService, versionService));
   app.use(auditLogsRouter(auditLogService, userService));
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -209,6 +209,25 @@ async function startMultipartUpload(userSlug: string, filename: string) {
     .expect(201);
 }
 
+async function startNewVersionUpload(
+  userSlug: string,
+  fileId: string,
+  totalSizeBytes = "7",
+  uploadType?: "single_part" | "multipart",
+) {
+  return request(app)
+    .post("/api/v1/uploads/start")
+    .set(authHeaders(userSlug))
+    .send({
+      uploadMode: "new_version",
+      targetFileId: fileId,
+      mimeType: uploadType === "multipart" ? "application/octet-stream" : "text/markdown",
+      totalSizeBytes,
+      ...(uploadType ? { uploadType } : {}),
+    })
+    .expect(201);
+}
+
 function registerPart(userSlug: string, uploadSessionId: string, partNumber: number) {
   const sizeBytes = partNumber === 3 ? "4194304" : "8388608";
 
@@ -320,6 +339,7 @@ describe.sequential("single-part uploads and signed downloads", () => {
 
     expect(response.body.data.uploadSessionId).toEqual(expect.any(String));
     expect(response.body.data.fileId).toEqual(expect.any(String));
+    expect(response.body.data.uploadMode).toBe("new_file");
     expect(response.body.data.status).toBe("created");
     expect(response.body.data.signedUpload.url).toContain("signature=fake");
     expect(responseText).not.toContain("objects/");
@@ -584,6 +604,242 @@ describe.sequential("single-part uploads and signed downloads", () => {
       expect.arrayContaining(["upload.started", "upload.completed", "file.download_requested"]),
     );
     expect(JSON.stringify(auditResponse.body)).not.toContain(download.body.data.url);
+  });
+});
+
+describe.sequential("file versioning", () => {
+  it("uploads a new single-part version, lists versions, restores the older version, and downloads it", async () => {
+    const userSlug = "versions";
+    const initial = await startUpload(userSlug, "Versioned.txt", "5");
+    const initialSession = await prisma.uploadSession.findUniqueOrThrow({
+      where: {
+        id: initial.body.data.uploadSessionId,
+      },
+    });
+    storage.putObject({
+      bucket: initialSession.bucket,
+      objectKey: initialSession.finalObjectKey,
+      sizeBytes: initialSession.totalSizeBytes,
+      contentType: initialSession.mimeType,
+      body: "first",
+    });
+    const versionOne = await markUploadCompleted(initialSession.id);
+    const queueLengthBefore = uploadFinalizationQueue.jobs.length;
+
+    const second = await startNewVersionUpload(userSlug, initial.body.data.fileId, "7");
+
+    expect(second.body.data).toMatchObject({
+      fileId: initial.body.data.fileId,
+      uploadMode: "new_version",
+      uploadType: "single_part",
+    });
+
+    const secondSession = await prisma.uploadSession.findUniqueOrThrow({
+      where: {
+        id: second.body.data.uploadSessionId,
+      },
+    });
+
+    expect(secondSession).toMatchObject({
+      uploadMode: "new_version",
+      targetFileId: initial.body.data.fileId,
+      targetFolderId: initialSession.targetFolderId,
+      filename: "Versioned.txt",
+    });
+
+    storage.putObject({
+      bucket: secondSession.bucket,
+      objectKey: secondSession.finalObjectKey,
+      sizeBytes: secondSession.totalSizeBytes,
+      contentType: secondSession.mimeType,
+      body: "second!",
+    });
+
+    const completion = await request(app)
+      .post(`/api/v1/uploads/${secondSession.id}/complete`)
+      .set(authHeaders(userSlug))
+      .expect(200);
+
+    expect(completion.body.data).toMatchObject({
+      uploadSessionId: secondSession.id,
+      fileId: initial.body.data.fileId,
+      status: "completing",
+      backgroundJobId: expect.any(String),
+    });
+    expect(uploadFinalizationQueue.jobs).toHaveLength(queueLengthBefore + 1);
+
+    const versionTwo = await markUploadCompleted(secondSession.id);
+    const fileCount = await prisma.file.count({
+      where: {
+        ownerId: secondSession.ownerId,
+        name: "Versioned.txt",
+      },
+    });
+
+    expect(fileCount).toBe(1);
+
+    const list = await request(app)
+      .get(`/api/v1/files/${initial.body.data.fileId}/versions`)
+      .set(authHeaders(userSlug))
+      .expect(200);
+
+    expect(
+      list.body.data.versions.map((version: { versionNumber: number }) => version.versionNumber),
+    ).toEqual([2, 1]);
+    expect(list.body.data.versions[0]).toMatchObject({
+      versionId: versionTwo.id,
+      sizeBytes: "7",
+      mimeType: "text/markdown",
+      contentHash: null,
+      isCurrent: true,
+    });
+    expect(list.body.data.versions[1]).toMatchObject({
+      versionId: versionOne.id,
+      sizeBytes: "5",
+      mimeType: "text/plain",
+      isCurrent: false,
+    });
+
+    const restored = await request(app)
+      .post(`/api/v1/files/${initial.body.data.fileId}/versions/${versionOne.id}/restore`)
+      .set(authHeaders(userSlug))
+      .expect(200);
+
+    expect(restored.body.data.file).toMatchObject({
+      id: initial.body.data.fileId,
+      currentVersionId: versionOne.id,
+      sizeBytes: "5",
+      mimeType: "text/plain",
+    });
+    expect(restored.body.data.currentVersion).toMatchObject({
+      versionId: versionOne.id,
+      isCurrent: true,
+    });
+
+    const download = await request(app)
+      .get(`/api/v1/files/${initial.body.data.fileId}/download`)
+      .set(authHeaders(userSlug))
+      .expect(200);
+
+    expect(download.body.data.sizeBytes).toBe("5");
+    expect(download.body.data.url).toContain(encodeURIComponent(versionOne.id));
+
+    const auditResponse = await request(app)
+      .get("/api/v1/audit-logs")
+      .query({ limit: 20 })
+      .set(authHeaders(userSlug))
+      .expect(200);
+    const actions = auditResponse.body.data.auditLogs.map((log: { action: string }) => log.action);
+
+    expect(actions).toEqual(
+      expect.arrayContaining(["file.version_uploaded", "file.version_restored"]),
+    );
+    expect(JSON.stringify(auditResponse.body)).not.toContain(second.body.data.signedUpload.url);
+  });
+
+  it("supports multipart upload sessions for new versions", async () => {
+    const userSlug = "versions-multipart";
+    const initial = await startUpload(userSlug, "Multipart Versioned.bin", "5");
+    await markUploadCompleted(initial.body.data.uploadSessionId);
+
+    const second = await startNewVersionUpload(
+      userSlug,
+      initial.body.data.fileId,
+      "20971520",
+      "multipart",
+    );
+    const uploadSessionId = second.body.data.uploadSessionId as string;
+
+    expect(second.body.data).toMatchObject({
+      fileId: initial.body.data.fileId,
+      uploadMode: "new_version",
+      uploadType: "multipart",
+    });
+    expect(second.body.data.multipart.signedParts).toHaveLength(3);
+
+    await registerPart(userSlug, uploadSessionId, 1).expect(201);
+    await registerPart(userSlug, uploadSessionId, 2).expect(201);
+    await registerPart(userSlug, uploadSessionId, 3).expect(201);
+
+    await request(app)
+      .post(`/api/v1/uploads/${uploadSessionId}/complete`)
+      .set(authHeaders(userSlug))
+      .expect(200)
+      .expect((completion) => {
+        expect(completion.body.data).toMatchObject({
+          uploadSessionId,
+          fileId: initial.body.data.fileId,
+          status: "completing",
+        });
+      });
+
+    const uploadSession = await prisma.uploadSession.findUniqueOrThrow({
+      where: {
+        id: uploadSessionId,
+      },
+    });
+
+    expect(uploadSession).toMatchObject({
+      uploadMode: "new_version",
+      targetFileId: initial.body.data.fileId,
+      receivedBytes: 20971520n,
+    });
+  });
+
+  it("rejects cross-user, deleted-file, and unavailable version operations", async () => {
+    const owner = "versions-owner";
+    const intruder = "versions-intruder";
+    const initial = await startUpload(owner, "Owner Versioned.txt", "5");
+    const versionOne = await markUploadCompleted(initial.body.data.uploadSessionId);
+
+    await ensureRootFolder(intruder);
+    await request(app)
+      .post("/api/v1/uploads/start")
+      .set(authHeaders(intruder))
+      .send({
+        uploadMode: "new_version",
+        targetFileId: initial.body.data.fileId,
+        mimeType: "text/plain",
+        totalSizeBytes: "6",
+      })
+      .expect(404);
+    await request(app)
+      .get(`/api/v1/files/${initial.body.data.fileId}/versions`)
+      .set(authHeaders(intruder))
+      .expect(404);
+    await request(app)
+      .post(`/api/v1/files/${initial.body.data.fileId}/versions/${versionOne.id}/restore`)
+      .set(authHeaders(intruder))
+      .expect(404);
+
+    const unavailableVersion = await createUnavailableVersion(initial.body.data.fileId, "failed");
+
+    await request(app)
+      .post(`/api/v1/files/${initial.body.data.fileId}/versions/${unavailableVersion.id}/restore`)
+      .set(authHeaders(owner))
+      .expect(409)
+      .expect((response) => {
+        expect(response.body.error.code).toBe("file_version_not_available");
+      });
+
+    await request(app)
+      .delete(`/api/v1/files/${initial.body.data.fileId}`)
+      .set(authHeaders(owner))
+      .expect(200);
+    await request(app)
+      .post("/api/v1/uploads/start")
+      .set(authHeaders(owner))
+      .send({
+        uploadMode: "new_version",
+        targetFileId: initial.body.data.fileId,
+        mimeType: "text/plain",
+        totalSizeBytes: "6",
+      })
+      .expect(404);
+    await request(app)
+      .post(`/api/v1/files/${initial.body.data.fileId}/versions/${versionOne.id}/restore`)
+      .set(authHeaders(owner))
+      .expect(404);
   });
 });
 
@@ -881,11 +1137,19 @@ async function markUploadCompleted(uploadSessionId: string) {
     throw new Error("Upload session is missing a target file.");
   }
 
+  const latestVersion = await prisma.fileVersion.findFirst({
+    where: {
+      fileId: uploadSession.targetFileId,
+    },
+    orderBy: {
+      versionNumber: "desc",
+    },
+  });
   const fileVersion = await prisma.fileVersion.create({
     data: {
       id: uploadSession.plannedVersionId,
       fileId: uploadSession.targetFileId,
-      versionNumber: 1,
+      versionNumber: (latestVersion?.versionNumber ?? 0) + 1,
       storageProvider: "s3-compatible",
       bucket: uploadSession.bucket,
       objectKey: uploadSession.finalObjectKey,
@@ -905,6 +1169,7 @@ async function markUploadCompleted(uploadSessionId: string) {
       currentVersionId: fileVersion.id,
       sizeBytes: fileVersion.sizeBytes,
       mimeType: fileVersion.mimeType,
+      contentHash: fileVersion.sha256,
     },
   });
 
@@ -920,14 +1185,69 @@ async function markUploadCompleted(uploadSessionId: string) {
   await prisma.auditLog.create({
     data: {
       actorUserId: uploadSession.ownerId,
-      action: "upload.completed",
+      action:
+        uploadSession.uploadMode === "new_version" ? "file.version_uploaded" : "upload.completed",
       resourceType: "file",
       resourceId: file.id,
       correlationId: uploadSession.correlationId,
       metadataJson: {
         uploadSessionId: uploadSession.id,
         fileVersionId: fileVersion.id,
+        uploadMode: uploadSession.uploadMode,
+        versionNumber: fileVersion.versionNumber,
       },
+    },
+  });
+
+  return fileVersion;
+}
+
+async function createUnavailableVersion(fileId: string, processingStatus: string) {
+  const file = await prisma.file.findUniqueOrThrow({
+    where: {
+      id: fileId,
+    },
+  });
+  const latestVersion = await prisma.fileVersion.findFirst({
+    where: {
+      fileId,
+    },
+    orderBy: {
+      versionNumber: "desc",
+    },
+  });
+  const plannedVersionId = randomUUID();
+  const uploadSession = await prisma.uploadSession.create({
+    data: {
+      ownerId: file.ownerId,
+      targetFolderId: file.folderId,
+      targetFileId: file.id,
+      plannedVersionId,
+      uploadMode: "new_version",
+      filename: file.name,
+      mimeType: file.mimeType ?? "application/octet-stream",
+      totalSizeBytes: 9n,
+      finalObjectKey: `objects/${file.ownerId}/${file.id}/versions/${plannedVersionId}/content`,
+      bucket: "nimbus-test",
+      status: "failed",
+      failureReason: "test_unavailable_version",
+      expiresAt: new Date(Date.now() + 60_000),
+    },
+  });
+
+  return prisma.fileVersion.create({
+    data: {
+      id: plannedVersionId,
+      fileId: file.id,
+      versionNumber: (latestVersion?.versionNumber ?? 0) + 1,
+      storageProvider: "s3-compatible",
+      bucket: uploadSession.bucket,
+      objectKey: uploadSession.finalObjectKey,
+      sizeBytes: uploadSession.totalSizeBytes,
+      mimeType: uploadSession.mimeType,
+      uploadSessionId: uploadSession.id,
+      createdById: uploadSession.ownerId,
+      processingStatus,
     },
   });
 }
