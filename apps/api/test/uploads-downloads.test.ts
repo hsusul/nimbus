@@ -9,6 +9,7 @@ import type {
   SignedUrl,
 } from "@nimbus/storage";
 import { ObjectNotFoundError } from "@nimbus/storage";
+import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -269,6 +270,74 @@ describe.sequential("single-part uploads and signed downloads", () => {
       .expect(201);
   });
 
+  it("does not let terminal upload placeholders reserve filenames", async () => {
+    const userSlug = "terminal-placeholders";
+    const filename = "Reusable Terminal Name.txt";
+    const normalizedName = "reusable terminal name.txt";
+    const rootFolderId = await ensureRootFolder(userSlug);
+    const user = await prisma.user.findFirstOrThrow({
+      where: {
+        email: `${userSlug}@${runId}.nimbus.test`,
+      },
+    });
+    const terminalFiles = await Promise.all(
+      ["failed", "canceled", "expired"].map(async (uploadStatus) => {
+        const file = await prisma.file.create({
+          data: {
+            ownerId: user.id,
+            folderId: rootFolderId,
+            name: filename,
+            normalizedName,
+            extension: "txt",
+            mimeType: "text/plain",
+            status: "failed",
+            sizeBytes: 5n,
+          },
+        });
+
+        await prisma.uploadSession.create({
+          data: {
+            ownerId: user.id,
+            targetFolderId: rootFolderId,
+            targetFileId: file.id,
+            plannedVersionId: randomUUID(),
+            uploadMode: "new_file",
+            filename,
+            mimeType: "text/plain",
+            totalSizeBytes: 5n,
+            finalObjectKey: `objects/${user.id}/${file.id}/versions/${randomUUID()}/content`,
+            bucket: "nimbus-test",
+            status: uploadStatus,
+            expiresAt: new Date(Date.now() - 1000),
+          },
+        });
+
+        return file;
+      }),
+    );
+
+    const children = await request(app)
+      .get(`/api/v1/folders/${rootFolderId}/children`)
+      .set(authHeaders(userSlug))
+      .expect(200);
+    const childIds = children.body.data.children.map((child: { id: string }) => child.id);
+
+    for (const file of terminalFiles) {
+      expect(childIds).not.toContain(file.id);
+    }
+
+    await request(app)
+      .post("/api/v1/uploads/start")
+      .set(authHeaders(userSlug))
+      .send({
+        folderId: rootFolderId,
+        filename,
+        mimeType: "text/plain",
+        totalSizeBytes: "5",
+      })
+      .expect(201);
+  });
+
   it("completes an upload after the object exists without storing bytes in Postgres", async () => {
     const response = await startUpload("complete", "Complete Object.txt");
     const uploadSession = await prisma.uploadSession.findUniqueOrThrow({
@@ -310,6 +379,19 @@ describe.sequential("single-part uploads and signed downloads", () => {
     expect(fileVersion.processingStatus).toBe("available");
     expect(fileVersion.objectKey).toBe(uploadSession.finalObjectKey);
     expect(persistedMetadata).not.toContain("hello-secret-bytes");
+
+    await request(app)
+      .post(`/api/v1/uploads/${uploadSession.id}/complete`)
+      .set(authHeaders("complete"))
+      .expect(409);
+
+    const fileVersionCount = await prisma.fileVersion.count({
+      where: {
+        uploadSessionId: uploadSession.id,
+      },
+    });
+
+    expect(fileVersionCount).toBe(1);
   });
 
   it("prevents another user from completing an upload session", async () => {
