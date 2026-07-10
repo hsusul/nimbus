@@ -21,6 +21,7 @@ import { shareLinksRouter } from "./routes/share-links";
 import { sharesRouter } from "./routes/shares";
 import { searchRouter } from "./routes/search";
 import { uploadsRouter } from "./routes/uploads";
+import { trashRouter } from "./routes/trash";
 import { PrismaAuditLogService, type AuditLogService } from "./services/audit-log";
 import { PrismaDownloadService, type DownloadService } from "./services/downloads";
 import { PrismaFileService, type FileService } from "./services/files";
@@ -41,6 +42,7 @@ import { PrismaShareLinkService, type ShareLinkService } from "./services/share-
 import { PrismaShareService, type ShareService } from "./services/shares";
 import { PrismaSearchService, type SearchService } from "./services/search";
 import { PrismaThumbnailService, type ThumbnailService } from "./services/thumbnails";
+import { PrismaTrashService, type TrashService } from "./services/trash";
 
 export interface AppDependencies {
   config?: ApiConfig;
@@ -62,6 +64,7 @@ export interface AppDependencies {
   jobService?: JobService;
   thumbnailService?: ThumbnailService;
   m8JobScheduler?: M8JobScheduler;
+  trashService?: TrashService;
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
@@ -133,6 +136,7 @@ export function createApp(dependencies: AppDependencies = {}) {
       permissionService,
       config.signedDownloadUrlTtlSeconds,
     );
+  const trashService = dependencies.trashService ?? new PrismaTrashService();
   const app = express();
 
   app.disable("x-powered-by");
@@ -160,6 +164,7 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use(filesRouter(fileService, userService, downloadService, versionService, thumbnailService));
   app.use(searchRouter(searchService, userService));
   app.use(jobsRouter(jobService, userService));
+  app.use(trashRouter(trashService, userService));
   app.use(sharesRouter(shareService, userService));
   app.use(shareLinksRouter(shareLinkService, userService));
   app.use(publicRouter(shareLinkService));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getApiConfig, getStorageConfig, loadConfig } from "../src/index";
+import { getApiConfig, getStorageConfig, getWebConfig, loadConfig } from "../src/index";
 
 describe("config validation", () => {
   it("loads valid local defaults", () => {
@@ -80,5 +80,23 @@ describe("config validation", () => {
         REDIS_URL: "redis://localhost:6379",
       }),
     ).toThrow();
+  });
+
+  it("exposes web dev identity only outside production", () => {
+    expect(
+      getWebConfig({
+        NODE_ENV: "development",
+        WEB_DEV_AUTH_USER: "console-user",
+        WEB_DEV_AUTH_EMAIL: "console@nimbus.local",
+        WEB_DEV_AUTH_NAME: "Console User",
+      }).devAuth,
+    ).toEqual({
+      user: "console-user",
+      email: "console@nimbus.local",
+      name: "Console User",
+    });
+    expect(
+      getWebConfig({ NODE_ENV: "production", WEB_DEV_AUTH_USER: "console-user" }).devAuth,
+    ).toBeNull();
   });
 });

@@ -351,4 +351,60 @@ describe.sequential("metadata core routes", () => {
       .set(intruderHeaders)
       .expect(404);
   });
+
+  it("lists only the authenticated owner's deleted files and folders", async () => {
+    const ownerHeaders = authHeaders("trash-owner");
+    const otherHeaders = authHeaders("trash-other");
+    const ownerRoot = await ensureRootFolder("trash-owner");
+    const otherRoot = await ensureRootFolder("trash-other");
+    const ownerFolder = await request(app)
+      .post("/api/v1/folders")
+      .set(ownerHeaders)
+      .send({ name: "Deleted Folder", parentFolderId: ownerRoot })
+      .expect(201);
+    const ownerFile = await request(app)
+      .post("/api/v1/files")
+      .set(ownerHeaders)
+      .send({ name: "deleted.txt", folderId: ownerRoot, sizeBytes: "5" })
+      .expect(201);
+    const otherFile = await request(app)
+      .post("/api/v1/files")
+      .set(otherHeaders)
+      .send({ name: "private.txt", folderId: otherRoot, sizeBytes: "7" })
+      .expect(201);
+
+    await request(app)
+      .delete(`/api/v1/folders/${ownerFolder.body.data.id}`)
+      .set(ownerHeaders)
+      .expect(200);
+    await request(app)
+      .delete(`/api/v1/files/${ownerFile.body.data.id}`)
+      .set(ownerHeaders)
+      .expect(200);
+    await request(app)
+      .delete(`/api/v1/files/${otherFile.body.data.id}`)
+      .set(otherHeaders)
+      .expect(200);
+
+    const first = await request(app)
+      .get("/api/v1/trash")
+      .query({ limit: 1 })
+      .set(ownerHeaders)
+      .expect(200);
+    expect(first.body.data.items).toHaveLength(1);
+    expect(first.body.data.pageInfo.hasMore).toBe(true);
+    expect(JSON.stringify(first.body)).not.toContain(otherFile.body.data.id);
+    expect(JSON.stringify(first.body)).not.toContain("objectKey");
+
+    const second = await request(app)
+      .get("/api/v1/trash")
+      .query({ limit: 10, cursor: first.body.data.pageInfo.nextCursor })
+      .set(ownerHeaders)
+      .expect(200);
+    const ids = [...first.body.data.items, ...second.body.data.items].map(
+      (item: { resourceId: string }) => item.resourceId,
+    );
+    expect(ids).toEqual(expect.arrayContaining([ownerFolder.body.data.id, ownerFile.body.data.id]));
+    expect(ids).not.toContain(otherFile.body.data.id);
+  });
 });

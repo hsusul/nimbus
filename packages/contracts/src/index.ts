@@ -10,6 +10,7 @@ export * from "./queues";
 export * from "./search";
 export * from "./sharing";
 export * from "./thumbnails";
+export * from "./trash";
 export * from "./uploads";
 
 export const ErrorEnvelopeSchema = z.object({

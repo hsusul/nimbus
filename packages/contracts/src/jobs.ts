@@ -68,3 +68,4 @@ export const JobDetailResponseSchema = z
   .strict();
 
 export type JobListQuery = z.infer<typeof JobListQuerySchema>;
+export type JobSummary = z.infer<typeof JobSummarySchema>;

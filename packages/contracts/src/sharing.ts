@@ -102,3 +102,6 @@ export const PublicShareResponseSchema = z
 
 export type ShareCreateRequest = z.infer<typeof ShareCreateRequestSchema>;
 export type ShareLinkCreateRequest = z.infer<typeof ShareLinkCreateRequestSchema>;
+export type Share = z.infer<typeof ShareSchema>;
+export type ShareLink = z.infer<typeof ShareLinkSchema>;
+export type PublicShareResponse = z.infer<typeof PublicShareResponseSchema>;

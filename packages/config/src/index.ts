@@ -87,6 +87,12 @@ const apiEnvSchema = z.object({
 const webEnvSchema = z.object({
   WEB_PORT: z.coerce.number().int().positive().max(65535).optional().default(3000),
   NEXT_PUBLIC_API_BASE_URL: z.string().url().optional().default("http://localhost:4000"),
+  WEB_DEV_AUTH_USER: z
+    .string()
+    .regex(/^[a-z0-9._-]{1,64}$/)
+    .optional(),
+  WEB_DEV_AUTH_EMAIL: z.string().email().optional(),
+  WEB_DEV_AUTH_NAME: z.string().min(1).max(120).optional(),
 });
 
 const workerEnvSchema = z.object({
@@ -197,6 +203,14 @@ export function getWebConfig(env: NodeJS.ProcessEnv = process.env) {
     nodeEnv: config.NODE_ENV,
     port: config.WEB_PORT,
     apiBaseUrl: config.NEXT_PUBLIC_API_BASE_URL,
+    devAuth:
+      config.NODE_ENV !== "production" && config.WEB_DEV_AUTH_USER
+        ? {
+            user: config.WEB_DEV_AUTH_USER,
+            email: config.WEB_DEV_AUTH_EMAIL,
+            name: config.WEB_DEV_AUTH_NAME,
+          }
+        : null,
   };
 }
 
