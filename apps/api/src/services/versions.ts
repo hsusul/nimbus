@@ -11,6 +11,7 @@ import { HttpError } from "../middleware/error-handler";
 import { appendAuditLog, type AuditContext } from "./audit-log";
 import { mapFile, type FileDto } from "./files";
 import { decodeCursor, encodeCursor, type Page } from "./pagination";
+import type { PermissionService } from "./permission-service";
 import type { InternalUser } from "./users";
 
 type TransactionClient = Prisma.TransactionClient;
@@ -48,14 +49,21 @@ export interface VersionService {
 }
 
 export class PrismaVersionService implements VersionService {
-  constructor(private readonly prisma: PrismaClient = getPrismaClient()) {}
+  constructor(
+    private readonly permissionService: PermissionService,
+    private readonly prisma: PrismaClient = getPrismaClient(),
+  ) {}
 
   async listVersions(
     actor: InternalUser,
     fileId: string,
     pagination: CursorPaginationQuery,
   ): Promise<Page<FileVersionDto>> {
-    const file = await getActiveOwnedFile(this.prisma, actor.id, fileId);
+    const grant = await this.permissionService.require(actor, "file.version.read", {
+      resourceType: "file",
+      resourceId: fileId,
+    });
+    const file = grant.file;
     const cursor = decodeCursor(pagination.cursor);
     const cursorDate = cursor ? new Date(cursor.createdAt) : null;
     const cursorId = cursor?.id;
@@ -93,8 +101,13 @@ export class PrismaVersionService implements VersionService {
     versionId: string,
     auditContext: AuditContext,
   ): Promise<RestoreFileVersionResult> {
+    const grant = await this.permissionService.require(actor, "file.version.restore", {
+      resourceType: "file",
+      resourceId: fileId,
+    });
+
     return this.prisma.$transaction(async (tx) => {
-      const file = await getActiveOwnedFile(tx, actor.id, fileId);
+      const file = await getActiveFile(tx, grant.file.ownerId, fileId);
       const version = await tx.fileVersion.findFirst({
         where: {
           id: versionId,
@@ -189,7 +202,7 @@ function mapFileVersion(
   };
 }
 
-async function getActiveOwnedFile(
+async function getActiveFile(
   prisma: PrismaClient | TransactionClient,
   ownerId: string,
   fileId: string,

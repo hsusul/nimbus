@@ -5,6 +5,8 @@ export type {
   File,
   FileVersion,
   Folder,
+  Share,
+  ShareLink,
   UploadChunk,
   UploadSession,
   User,

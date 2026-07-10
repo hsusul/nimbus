@@ -11,6 +11,7 @@ import type { InternalUser } from "./users";
 import { appendAuditLog, type AuditContext } from "./audit-log";
 import { decodeCursor, toPage, type Page } from "./pagination";
 import { normalizeResourceName } from "./resource-names";
+import type { PermissionService } from "./permission-service";
 
 type TransactionClient = Prisma.TransactionClient;
 
@@ -59,7 +60,10 @@ export interface FileService {
 }
 
 export class PrismaFileService implements FileService {
-  constructor(private readonly prisma: PrismaClient = getPrismaClient()) {}
+  constructor(
+    private readonly permissionService: PermissionService,
+    private readonly prisma: PrismaClient = getPrismaClient(),
+  ) {}
 
   async createFile(
     actor: InternalUser,
@@ -105,20 +109,12 @@ export class PrismaFileService implements FileService {
   }
 
   async getFile(actor: InternalUser, fileId: string): Promise<FileDto> {
-    const file = await this.prisma.file.findFirst({
-      where: {
-        id: fileId,
-        ownerId: actor.id,
-        status: "active",
-        deletedAt: null,
-      },
+    const grant = await this.permissionService.require(actor, "file.read", {
+      resourceType: "file",
+      resourceId: fileId,
     });
 
-    if (!file) {
-      throw new HttpError(404, "file_not_found", "File was not found.");
-    }
-
-    return mapFile(file);
+    return mapFile(grant.file);
   }
 
   async listFiles(
@@ -168,12 +164,23 @@ export class PrismaFileService implements FileService {
     input: FileUpdateRequest,
     auditContext: AuditContext,
   ): Promise<FileDto> {
+    const grant = await this.permissionService.require(actor, "file.write", {
+      resourceType: "file",
+      resourceId: fileId,
+    });
+
     return this.prisma.$transaction(async (tx) => {
-      const file = await getActiveFile(tx, actor.id, fileId);
+      const file = await getActiveFile(tx, grant.file.ownerId, fileId);
       const name = input.name ? normalizeResourceName(input.name) : null;
 
       if (name) {
-        await assertFileNameAvailable(tx, actor.id, file.folderId, name.normalizedName, file.id);
+        await assertFileNameAvailable(
+          tx,
+          file.ownerId,
+          file.folderId,
+          name.normalizedName,
+          file.id,
+        );
       }
 
       const updatedFile = await tx.file.update({
@@ -219,11 +226,16 @@ export class PrismaFileService implements FileService {
     input: FileMoveRequest,
     auditContext: AuditContext,
   ): Promise<FileDto> {
-    return this.prisma.$transaction(async (tx) => {
-      const file = await getActiveFile(tx, actor.id, fileId);
+    const grant = await this.permissionService.require(actor, "file.write", {
+      resourceType: "file",
+      resourceId: fileId,
+    });
 
-      await getActiveFolder(tx, actor.id, input.folderId);
-      await assertFileNameAvailable(tx, actor.id, input.folderId, file.normalizedName, file.id);
+    return this.prisma.$transaction(async (tx) => {
+      const file = await getActiveFile(tx, grant.file.ownerId, fileId);
+
+      await getActiveFolder(tx, file.ownerId, input.folderId);
+      await assertFileNameAvailable(tx, file.ownerId, input.folderId, file.normalizedName, file.id);
 
       const updatedFile = await tx.file.update({
         where: {
@@ -254,8 +266,13 @@ export class PrismaFileService implements FileService {
     fileId: string,
     auditContext: AuditContext,
   ): Promise<FileDto> {
+    const grant = await this.permissionService.require(actor, "file.delete", {
+      resourceType: "file",
+      resourceId: fileId,
+    });
+
     return this.prisma.$transaction(async (tx) => {
-      const file = await getActiveFile(tx, actor.id, fileId);
+      const file = await getActiveFile(tx, grant.file.ownerId, fileId);
       const deletedFile = await tx.file.update({
         where: {
           id: file.id,

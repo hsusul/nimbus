@@ -6,6 +6,7 @@ export * from "./files";
 export * from "./folders";
 export * from "./pagination";
 export * from "./queues";
+export * from "./sharing";
 export * from "./uploads";
 
 export const ErrorEnvelopeSchema = z.object({

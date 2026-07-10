@@ -79,6 +79,26 @@ export async function finalizeUploadSession(
     return;
   }
 
+  if (
+    uploadSession.uploadMode === "new_version" &&
+    !(await hasCurrentFileWritePermission(
+      prisma,
+      uploadSession.ownerId,
+      uploadSession.targetFileId,
+    ))
+  ) {
+    await failUploadTerminal(
+      prisma,
+      parsed.backgroundJobId,
+      uploadSession.id,
+      uploadSession.targetFileId,
+      "upload_permission_revoked",
+      correlationId,
+      { failTargetFile: false },
+    );
+    return;
+  }
+
   const existingVersion = await prisma.fileVersion.findUnique({
     where: {
       uploadSessionId: uploadSession.id,
@@ -94,6 +114,7 @@ export async function finalizeUploadSession(
       existingVersion.id,
       correlationId,
       uploadSession.uploadMode,
+      uploadSession.ownerId,
     );
     return;
   }
@@ -250,6 +271,25 @@ export async function finalizeUploadSession(
         parsed.backgroundJobId,
         lockedSession.id,
         "target_file_not_available",
+        correlationId,
+      );
+      return;
+    }
+
+    if (
+      lockedSession.uploadMode === "new_version" &&
+      !(await hasCurrentFileWritePermission(
+        tx,
+        lockedSession.ownerId,
+        lockedSession.targetFileId,
+        targetFile.ownerId,
+      ))
+    ) {
+      await markUploadAndJobFailed(
+        tx,
+        parsed.backgroundJobId,
+        lockedSession.id,
+        "upload_permission_revoked",
         correlationId,
       );
       return;
@@ -440,6 +480,7 @@ async function completeWithExistingVersion(
   fileVersionId: string,
   correlationId: string,
   uploadMode: string,
+  uploadOwnerId: string,
 ) {
   await prisma.$transaction(async (tx) => {
     const targetFile = await lockAndGetTargetFile(tx, targetFileId);
@@ -461,6 +502,20 @@ async function completeWithExistingVersion(
         backgroundJobId,
         uploadSessionId,
         "target_file_not_available",
+        correlationId,
+      );
+      return;
+    }
+
+    if (
+      uploadMode === "new_version" &&
+      !(await hasCurrentFileWritePermission(tx, uploadOwnerId, targetFileId, targetFile.ownerId))
+    ) {
+      await markUploadAndJobFailed(
+        tx,
+        backgroundJobId,
+        uploadSessionId,
+        "upload_permission_revoked",
         correlationId,
       );
       return;
@@ -682,6 +737,53 @@ async function getNextVersionNumber(tx: Prisma.TransactionClient, fileId: string
   });
 
   return (latestVersion?.versionNumber ?? 0) + 1;
+}
+
+async function hasCurrentFileWritePermission(
+  prisma: PrismaClient | Prisma.TransactionClient,
+  actorUserId: string,
+  fileId: string,
+  knownOwnerId?: string,
+): Promise<boolean> {
+  const actor = await prisma.user.findUnique({
+    where: { id: actorUserId },
+    select: { status: true },
+  });
+
+  if (actor?.status !== "active") {
+    return false;
+  }
+
+  const ownerId =
+    knownOwnerId ??
+    (
+      await prisma.file.findUnique({
+        where: { id: fileId },
+        select: { ownerId: true },
+      })
+    )?.ownerId;
+
+  if (!ownerId) {
+    return false;
+  }
+
+  if (ownerId === actorUserId) {
+    return true;
+  }
+
+  const editorShare = await prisma.share.findFirst({
+    where: {
+      resourceType: "file",
+      resourceId: fileId,
+      granteeUserId: actorUserId,
+      role: "editor",
+      revokedAt: null,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    },
+    select: { id: true },
+  });
+
+  return editorShare !== null;
 }
 
 function getHeadSha256(metadata: ObjectMetadata): string | null {

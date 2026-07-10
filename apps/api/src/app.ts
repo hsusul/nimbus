@@ -15,16 +15,22 @@ import { foldersRouter } from "./routes/folders";
 import { healthRouter } from "./routes/health";
 import { meRouter } from "./routes/me";
 import { readyRouter } from "./routes/ready";
+import { publicRouter } from "./routes/public";
+import { shareLinksRouter } from "./routes/share-links";
+import { sharesRouter } from "./routes/shares";
 import { uploadsRouter } from "./routes/uploads";
 import { PrismaAuditLogService, type AuditLogService } from "./services/audit-log";
 import { PrismaDownloadService, type DownloadService } from "./services/downloads";
 import { PrismaFileService, type FileService } from "./services/files";
 import { PrismaFolderService, type FolderService } from "./services/folders";
+import { PrismaPermissionService, type PermissionService } from "./services/permission-service";
 import { BullMqUploadFinalizationQueue, type UploadFinalizationQueue } from "./services/queue";
 import { createReadinessChecker, type ReadinessChecker } from "./services/readiness";
 import { PrismaUploadService, type UploadService } from "./services/uploads";
 import { PrismaUserService, type UserService } from "./services/users";
 import { PrismaVersionService, type VersionService } from "./services/versions";
+import { PrismaShareLinkService, type ShareLinkService } from "./services/share-links";
+import { PrismaShareService, type ShareService } from "./services/shares";
 
 export interface AppDependencies {
   config?: ApiConfig;
@@ -39,6 +45,9 @@ export interface AppDependencies {
   uploadService?: UploadService;
   downloadService?: DownloadService;
   versionService?: VersionService;
+  permissionService?: PermissionService;
+  shareService?: ShareService;
+  shareLinkService?: ShareLinkService;
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
@@ -51,9 +60,10 @@ export function createApp(dependencies: AppDependencies = {}) {
     });
   const readinessChecker = dependencies.readinessChecker ?? createReadinessChecker(config.redisUrl);
   const userService = dependencies.userService ?? new PrismaUserService();
+  const permissionService = dependencies.permissionService ?? new PrismaPermissionService();
   const folderService =
     dependencies.folderService ?? new PrismaFolderService(undefined, config.maxFolderDepth);
-  const fileService = dependencies.fileService ?? new PrismaFileService();
+  const fileService = dependencies.fileService ?? new PrismaFileService(permissionService);
   const auditLogService = dependencies.auditLogService ?? new PrismaAuditLogService();
   const storageProvider =
     dependencies.storageProvider ??
@@ -67,20 +77,32 @@ export function createApp(dependencies: AppDependencies = {}) {
     dependencies.uploadFinalizationQueue ?? new BullMqUploadFinalizationQueue(config.redisUrl);
   const uploadService =
     dependencies.uploadService ??
-    new PrismaUploadService(storageProvider, uploadFinalizationQueue, {
-      bucket: config.storage.bucket,
-      maxFileSizeBytes: config.maxFileSizeBytes,
-      signedUploadUrlTtlSeconds: config.signedUploadUrlTtlSeconds,
-      uploadSessionTtlSeconds: config.uploadSessionTtlSeconds,
-      multipartUploadThresholdBytes: config.multipartUploadThresholdBytes,
-      multipartChunkSizeBytes: config.multipartChunkSizeBytes,
-    });
+    new PrismaUploadService(
+      storageProvider,
+      uploadFinalizationQueue,
+      {
+        bucket: config.storage.bucket,
+        maxFileSizeBytes: config.maxFileSizeBytes,
+        signedUploadUrlTtlSeconds: config.signedUploadUrlTtlSeconds,
+        uploadSessionTtlSeconds: config.uploadSessionTtlSeconds,
+        multipartUploadThresholdBytes: config.multipartUploadThresholdBytes,
+        multipartChunkSizeBytes: config.multipartChunkSizeBytes,
+      },
+      permissionService,
+    );
   const downloadService =
     dependencies.downloadService ??
-    new PrismaDownloadService(storageProvider, {
-      signedDownloadUrlTtlSeconds: config.signedDownloadUrlTtlSeconds,
-    });
-  const versionService = dependencies.versionService ?? new PrismaVersionService();
+    new PrismaDownloadService(
+      storageProvider,
+      {
+        signedDownloadUrlTtlSeconds: config.signedDownloadUrlTtlSeconds,
+      },
+      permissionService,
+    );
+  const versionService = dependencies.versionService ?? new PrismaVersionService(permissionService);
+  const shareService = dependencies.shareService ?? new PrismaShareService(permissionService);
+  const shareLinkService =
+    dependencies.shareLinkService ?? new PrismaShareLinkService(permissionService, downloadService);
   const app = express();
 
   app.disable("x-powered-by");
@@ -95,7 +117,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     logger.info("request_started", {
       request_id: req.context.requestId,
       method: req.method,
-      path: req.path,
+      path: redactPublicTokenPath(req.path),
     });
     next();
   });
@@ -106,9 +128,16 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use(foldersRouter(folderService, userService));
   app.use(uploadsRouter(uploadService, userService));
   app.use(filesRouter(fileService, userService, downloadService, versionService));
+  app.use(sharesRouter(shareService, userService));
+  app.use(shareLinksRouter(shareLinkService, userService));
+  app.use(publicRouter(shareLinkService));
   app.use(auditLogsRouter(auditLogService, userService));
   app.use(notFoundHandler);
   app.use(errorHandler);
 
   return app;
+}
+
+function redactPublicTokenPath(path: string): string {
+  return path.replace(/^(\/api\/v1\/public\/)[^/]+/, "$1[REDACTED]");
 }

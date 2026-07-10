@@ -20,34 +20,37 @@ model User {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  folders   Folder[]   @relation("FolderOwner")
-  files     File[]     @relation("FileOwner")
-  auditLogs AuditLog[] @relation("AuditActor")
-  uploadSessions UploadSession[] @relation("UploadSessionOwner")
-  uploadChunks UploadChunk[] @relation("UploadChunkOwner")
-  createdFileVersions FileVersion[] @relation("FileVersionCreator")
+  folders             Folder[]        @relation("FolderOwner")
+  files               File[]          @relation("FileOwner")
+  auditLogs           AuditLog[]      @relation("AuditActor")
+  uploadSessions      UploadSession[] @relation("UploadSessionOwner")
+  uploadChunks        UploadChunk[]   @relation("UploadChunkOwner")
+  createdFileVersions FileVersion[]   @relation("FileVersionCreator")
+  sharesCreated       Share[]         @relation("ShareCreator")
+  sharesReceived      Share[]         @relation("ShareGrantee")
+  shareLinksCreated   ShareLink[]     @relation("ShareLinkCreator")
 
   @@index([status])
   @@map("users")
 }
 
 model Folder {
-  id              String    @id @default(cuid())
-  ownerId         String    @map("owner_id")
-  parentFolderId  String?   @map("parent_folder_id")
-  name            String
-  normalizedName  String    @map("normalized_name")
-  pathCache       String?   @map("path_cache")
-  depth           Int       @default(0)
-  status          String    @default("active")
-  deletedAt       DateTime? @map("deleted_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  id             String    @id @default(cuid())
+  ownerId        String    @map("owner_id")
+  parentFolderId String?   @map("parent_folder_id")
+  name           String
+  normalizedName String    @map("normalized_name")
+  pathCache      String?   @map("path_cache")
+  depth          Int       @default(0)
+  status         String    @default("active")
+  deletedAt      DateTime? @map("deleted_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  owner        User     @relation("FolderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  parentFolder Folder?  @relation("FolderTree", fields: [parentFolderId], references: [id], onDelete: Restrict)
-  childFolders Folder[] @relation("FolderTree")
-  files        File[]
+  owner          User            @relation("FolderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  parentFolder   Folder?         @relation("FolderTree", fields: [parentFolderId], references: [id], onDelete: Restrict)
+  childFolders   Folder[]        @relation("FolderTree")
+  files          File[]
   uploadSessions UploadSession[]
 
   @@index([ownerId, parentFolderId])
@@ -57,25 +60,25 @@ model Folder {
 }
 
 model File {
-  id             String    @id @default(cuid())
-  ownerId        String    @map("owner_id")
-  folderId       String    @map("folder_id")
-  name           String
-  normalizedName String    @map("normalized_name")
-  extension      String?
-  mimeType       String?   @map("mime_type")
-  status         String    @default("active")
-  sizeBytes      BigInt    @default(0) @map("size_bytes")
-  contentHash    String?   @map("content_hash")
-  currentVersionId String? @map("current_version_id")
-  deletedAt      DateTime? @map("deleted_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  id               String    @id @default(cuid())
+  ownerId          String    @map("owner_id")
+  folderId         String    @map("folder_id")
+  name             String
+  normalizedName   String    @map("normalized_name")
+  extension        String?
+  mimeType         String?   @map("mime_type")
+  status           String    @default("active")
+  sizeBytes        BigInt    @default(0) @map("size_bytes")
+  contentHash      String?   @map("content_hash")
+  currentVersionId String?   @map("current_version_id")
+  deletedAt        DateTime? @map("deleted_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  owner  User   @relation("FileOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  folder Folder @relation(fields: [folderId], references: [id], onDelete: Restrict)
-  versions FileVersion[] @relation("FileVersions")
-  currentVersion FileVersion? @relation("CurrentFileVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  owner          User            @relation("FileOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  folder         Folder          @relation(fields: [folderId], references: [id], onDelete: Restrict)
+  versions       FileVersion[]   @relation("FileVersions")
+  currentVersion FileVersion?    @relation("CurrentFileVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
   uploadSessions UploadSession[] @relation("UploadSessionTargetFile")
 
   @@index([ownerId, folderId])
@@ -86,36 +89,36 @@ model File {
 }
 
 model UploadSession {
-  id               String    @id @default(cuid())
-  ownerId          String    @map("owner_id")
-  targetFolderId   String    @map("target_folder_id")
-  targetFileId     String?   @map("target_file_id")
-  plannedVersionId String    @map("planned_version_id")
-  uploadMode       String    @default("new_file") @map("upload_mode")
-  filename         String
-  mimeType         String    @map("mime_type")
-  totalSizeBytes   BigInt    @map("total_size_bytes")
-  expectedSha256   String?   @map("expected_sha256")
-  finalObjectKey   String    @map("final_object_key")
-  bucket           String
-  uploadType       String    @default("single_part") @map("upload_type")
-  multipartUploadId String?  @map("multipart_upload_id")
-  chunkSizeBytes   BigInt?   @map("chunk_size_bytes")
-  receivedBytes    BigInt    @default(0) @map("received_bytes")
-  status           String    @default("created")
-  correlationId    String?   @map("correlation_id")
-  expiresAt        DateTime  @map("expires_at")
-  completedAt      DateTime? @map("completed_at")
-  failureReason    String?   @map("failure_reason")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id                String    @id @default(cuid())
+  ownerId           String    @map("owner_id")
+  targetFolderId    String    @map("target_folder_id")
+  targetFileId      String?   @map("target_file_id")
+  plannedVersionId  String    @map("planned_version_id")
+  uploadMode        String    @default("new_file") @map("upload_mode")
+  filename          String
+  mimeType          String    @map("mime_type")
+  totalSizeBytes    BigInt    @map("total_size_bytes")
+  expectedSha256    String?   @map("expected_sha256")
+  finalObjectKey    String    @map("final_object_key")
+  bucket            String
+  uploadType        String    @default("single_part") @map("upload_type")
+  multipartUploadId String?   @map("multipart_upload_id")
+  chunkSizeBytes    BigInt?   @map("chunk_size_bytes")
+  receivedBytes     BigInt    @default(0) @map("received_bytes")
+  status            String    @default("created")
+  correlationId     String?   @map("correlation_id")
+  expiresAt         DateTime  @map("expires_at")
+  completedAt       DateTime? @map("completed_at")
+  failureReason     String?   @map("failure_reason")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  owner        User          @relation("UploadSessionOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  targetFolder Folder        @relation(fields: [targetFolderId], references: [id], onDelete: Restrict)
-  targetFile   File?         @relation("UploadSessionTargetFile", fields: [targetFileId], references: [id], onDelete: SetNull)
-  fileVersion  FileVersion?
+  owner          User            @relation("UploadSessionOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  targetFolder   Folder          @relation(fields: [targetFolderId], references: [id], onDelete: Restrict)
+  targetFile     File?           @relation("UploadSessionTargetFile", fields: [targetFileId], references: [id], onDelete: SetNull)
+  fileVersion    FileVersion?
   backgroundJobs BackgroundJob[]
-  uploadChunks UploadChunk[]
+  uploadChunks   UploadChunk[]
 
   @@index([ownerId, status])
   @@index([targetFolderId])
@@ -188,10 +191,10 @@ model FileVersion {
   processingStatus String   @default("pending") @map("processing_status")
   createdAt        DateTime @default(now()) @map("created_at")
 
-  file            File            @relation("FileVersions", fields: [fileId], references: [id], onDelete: Cascade)
-  currentForFiles File[]          @relation("CurrentFileVersion")
-  uploadSession   UploadSession   @relation(fields: [uploadSessionId], references: [id], onDelete: Restrict)
-  createdBy       User            @relation("FileVersionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  file            File          @relation("FileVersions", fields: [fileId], references: [id], onDelete: Cascade)
+  currentForFiles File[]        @relation("CurrentFileVersion")
+  uploadSession   UploadSession @relation(fields: [uploadSessionId], references: [id], onDelete: Restrict)
+  createdBy       User          @relation("FileVersionCreator", fields: [createdById], references: [id], onDelete: Restrict)
 
   @@unique([fileId, versionNumber])
   @@index([fileId, createdAt])
@@ -220,4 +223,46 @@ model AuditLog {
   @@index([resourceType, resourceId, createdAt])
   @@index([requestId])
   @@map("audit_logs")
+}
+
+model Share {
+  id            String    @id @default(cuid())
+  resourceType  String    @map("resource_type")
+  resourceId    String    @map("resource_id")
+  granteeUserId String    @map("grantee_user_id")
+  role          String
+  createdById   String    @map("created_by_id")
+  expiresAt     DateTime? @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  grantee   User @relation("ShareGrantee", fields: [granteeUserId], references: [id], onDelete: Cascade)
+  createdBy User @relation("ShareCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([resourceType, resourceId])
+  @@index([granteeUserId, revokedAt])
+  @@index([createdById, revokedAt])
+  @@map("shares")
+}
+
+model ShareLink {
+  id           String    @id @default(cuid())
+  resourceType String    @map("resource_type")
+  resourceId   String    @map("resource_id")
+  tokenHash    String    @unique @map("token_hash")
+  role         String    @default("viewer")
+  createdById  String    @map("created_by_id")
+  expiresAt    DateTime? @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  useCount     Int       @default(0) @map("use_count")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  createdBy User @relation("ShareLinkCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([resourceType, resourceId])
+  @@index([createdById, revokedAt])
+  @@index([expiresAt])
+  @@map("share_links")
 }

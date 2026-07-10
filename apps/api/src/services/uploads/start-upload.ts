@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { HttpError } from "../../middleware/error-handler";
 import { appendAuditLog, type AuditContext } from "../audit-log";
 import { normalizeResourceName } from "../resource-names";
+import type { PermissionService } from "../permission-service";
 import type { InternalUser } from "../users";
 import {
   assertFileNameAvailable,
@@ -59,6 +60,7 @@ export async function startUpload(
   auditContext: AuditContext,
   storage: ObjectStorageProvider,
   options: UploadServiceOptions,
+  permissionService: PermissionService,
   prisma: PrismaClient = getPrismaClient(),
 ): Promise<UploadStartResult> {
   const uploadMode = input.uploadMode;
@@ -91,6 +93,13 @@ export async function startUpload(
     throw new HttpError(400, message, "Multipart upload plan is invalid.");
   }
 
+  const versionGrant =
+    uploadMode === "new_version" && input.targetFileId
+      ? await permissionService.require(actor, "file.write", {
+          resourceType: "file",
+          resourceId: input.targetFileId,
+        })
+      : null;
   const fileId = uploadMode === "new_version" ? input.targetFileId : randomUUID();
 
   if (!fileId) {
@@ -100,7 +109,7 @@ export async function startUpload(
   const uploadSessionId = randomUUID();
   const plannedVersionId = randomUUID();
   const finalObjectKey = buildVersionObjectKey({
-    tenantId: actor.id,
+    tenantId: versionGrant?.file.ownerId ?? actor.id,
     fileId,
     versionId: plannedVersionId,
   });
@@ -169,7 +178,7 @@ export async function startUpload(
     const targetFile = await tx.file.findFirst({
       where: {
         id: fileId,
-        ownerId: actor.id,
+        ownerId: versionGrant?.file.ownerId,
         status: "active",
         deletedAt: null,
       },

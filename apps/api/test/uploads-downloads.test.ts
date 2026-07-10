@@ -258,6 +258,17 @@ async function cleanupRunData() {
     return;
   }
 
+  await prisma.share.deleteMany({
+    where: {
+      OR: [{ createdById: { in: userIds } }, { granteeUserId: { in: userIds } }],
+    },
+  });
+  await prisma.shareLink.deleteMany({
+    where: {
+      createdById: { in: userIds },
+    },
+  });
+
   await prisma.auditLog.deleteMany({
     where: {
       actorUserId: {

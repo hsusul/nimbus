@@ -155,6 +155,12 @@ async function cleanupRunData() {
     return;
   }
 
+  await prisma.share.deleteMany({
+    where: {
+      OR: [{ createdById: { in: userIds } }, { granteeUserId: { in: userIds } }],
+    },
+  });
+
   await prisma.auditLog.deleteMany({
     where: {
       actorUserId: {
@@ -859,6 +865,66 @@ describe.sequential("upload finalization worker", () => {
     expect(backgroundJob).toMatchObject({
       status: "failed",
       lastError: "object_missing",
+    });
+    expect(versionCount).toBe(0);
+  });
+
+  it("rejects queued editor finalization after the direct share is revoked", async () => {
+    const fixture = await createNewVersionUploadFixture("new-version-revoked-editor", {
+      totalSizeBytes: 6n,
+    });
+    const editor = await prisma.user.create({
+      data: {
+        authSubject: `${runId}-revoked-editor`,
+        email: `revoked-editor@${runId}.nimbus.test`,
+        displayName: "revoked editor",
+      },
+    });
+    const share = await prisma.share.create({
+      data: {
+        resourceType: "file",
+        resourceId: fixture.fileId,
+        granteeUserId: editor.id,
+        role: "editor",
+        createdById: fixture.userId,
+      },
+    });
+    await prisma.uploadSession.update({
+      where: { id: fixture.uploadSessionId },
+      data: { ownerId: editor.id },
+    });
+    storage.putObject({
+      bucket: "nimbus-test",
+      objectKey: fixture.objectKey,
+      sizeBytes: 6n,
+      contentType: "text/plain",
+    });
+    await prisma.share.update({ where: { id: share.id }, data: { revokedAt: new Date() } });
+
+    await finalizeUploadSession(
+      {
+        uploadSessionId: fixture.uploadSessionId,
+        backgroundJobId: fixture.backgroundJobId,
+        correlationId: "corr-revoked-editor",
+      },
+      { prisma, storage },
+    );
+
+    const [file, uploadSession, backgroundJob, versionCount] = await Promise.all([
+      prisma.file.findUniqueOrThrow({ where: { id: fixture.fileId } }),
+      prisma.uploadSession.findUniqueOrThrow({ where: { id: fixture.uploadSessionId } }),
+      prisma.backgroundJob.findUniqueOrThrow({ where: { id: fixture.backgroundJobId } }),
+      prisma.fileVersion.count({ where: { uploadSessionId: fixture.uploadSessionId } }),
+    ]);
+    expect(file.currentVersionId).toBe(fixture.previousVersionId);
+    expect(file.status).toBe("active");
+    expect(uploadSession).toMatchObject({
+      status: "failed",
+      failureReason: "upload_permission_revoked",
+    });
+    expect(backgroundJob).toMatchObject({
+      status: "failed",
+      lastError: "upload_permission_revoked",
     });
     expect(versionCount).toBe(0);
   });
