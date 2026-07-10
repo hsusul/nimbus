@@ -94,6 +94,7 @@ export async function enqueueUploadCompletion(
     });
     const backgroundJob = await tx.backgroundJob.create({
       data: {
+        ownerId: actor.id,
         queueName: UPLOAD_FINALIZATION_QUEUE_NAME,
         resourceType: "upload_session",
         resourceId: session.id,
@@ -133,7 +134,8 @@ export async function enqueueUploadCompletion(
         },
         data: {
           status: "failed",
-          lastError: error instanceof Error ? error.message : String(error),
+          lastError: "queue_enqueue_failed",
+          failureCode: "queue_enqueue_failed",
           completedAt: new Date(),
         },
       });

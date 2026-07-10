@@ -1,5 +1,11 @@
 import type { AuthenticatedUser } from "@nimbus/auth";
-import { getPrismaClient, Prisma, type PrismaClient, type User } from "@nimbus/db";
+import {
+  buildFolderSearchDocument,
+  getPrismaClient,
+  Prisma,
+  type PrismaClient,
+  type User,
+} from "@nimbus/db";
 
 import { normalizeResourceName } from "./resource-names";
 
@@ -84,6 +90,7 @@ async function ensureRootFolder(tx: Prisma.TransactionClient, ownerId: string): 
       normalizedName: rootName.normalizedName,
       depth: 0,
       status: "active",
+      searchDocument: buildFolderSearchDocument(rootName.name),
     },
     select: {
       id: true,

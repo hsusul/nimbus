@@ -2,6 +2,7 @@ import type { CursorPaginationQuery } from "@nimbus/contracts";
 import {
   type File as PrismaFile,
   type FileVersion as PrismaFileVersion,
+  buildFileSearchDocument,
   getPrismaClient,
   Prisma,
   type PrismaClient,
@@ -136,6 +137,11 @@ export class PrismaVersionService implements VersionService {
           sizeBytes: version.sizeBytes,
           mimeType: version.mimeType,
           contentHash: version.sha256,
+          searchDocument: buildFileSearchDocument({
+            name: file.name,
+            extension: file.extension,
+            mimeType: version.mimeType,
+          }),
         },
       });
 

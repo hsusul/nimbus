@@ -24,6 +24,10 @@ export function buildSinglePartUploadObjectKey(input: SinglePartUploadObjectKeyI
   return `uploads/${tenantId}/${uploadSessionId}/single/content`;
 }
 
+export function buildThumbnailObjectKey(input: VersionObjectKeyInput): string {
+  return `${buildVersionObjectKey(input).replace(/\/content$/, "")}/derived/thumbnail.webp`;
+}
+
 function normalizeKeySegment(value: string, fieldName: string): string {
   if (!value || value.includes("/") || value.includes("\\") || value.includes("..")) {
     throw new Error(`${fieldName} is not a safe object key segment.`);

@@ -13,16 +13,24 @@ import { auditLogsRouter } from "./routes/audit-logs";
 import { filesRouter } from "./routes/files";
 import { foldersRouter } from "./routes/folders";
 import { healthRouter } from "./routes/health";
+import { jobsRouter } from "./routes/jobs";
 import { meRouter } from "./routes/me";
 import { readyRouter } from "./routes/ready";
 import { publicRouter } from "./routes/public";
 import { shareLinksRouter } from "./routes/share-links";
 import { sharesRouter } from "./routes/shares";
+import { searchRouter } from "./routes/search";
 import { uploadsRouter } from "./routes/uploads";
 import { PrismaAuditLogService, type AuditLogService } from "./services/audit-log";
 import { PrismaDownloadService, type DownloadService } from "./services/downloads";
 import { PrismaFileService, type FileService } from "./services/files";
 import { PrismaFolderService, type FolderService } from "./services/folders";
+import { PrismaJobService, type JobService } from "./services/jobs";
+import {
+  BullMqM8QueueAdapter,
+  type M8JobScheduler,
+  PrismaM8JobScheduler,
+} from "./services/m8-jobs";
 import { PrismaPermissionService, type PermissionService } from "./services/permission-service";
 import { BullMqUploadFinalizationQueue, type UploadFinalizationQueue } from "./services/queue";
 import { createReadinessChecker, type ReadinessChecker } from "./services/readiness";
@@ -31,6 +39,8 @@ import { PrismaUserService, type UserService } from "./services/users";
 import { PrismaVersionService, type VersionService } from "./services/versions";
 import { PrismaShareLinkService, type ShareLinkService } from "./services/share-links";
 import { PrismaShareService, type ShareService } from "./services/shares";
+import { PrismaSearchService, type SearchService } from "./services/search";
+import { PrismaThumbnailService, type ThumbnailService } from "./services/thumbnails";
 
 export interface AppDependencies {
   config?: ApiConfig;
@@ -48,6 +58,10 @@ export interface AppDependencies {
   permissionService?: PermissionService;
   shareService?: ShareService;
   shareLinkService?: ShareLinkService;
+  searchService?: SearchService;
+  jobService?: JobService;
+  thumbnailService?: ThumbnailService;
+  m8JobScheduler?: M8JobScheduler;
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
@@ -61,9 +75,14 @@ export function createApp(dependencies: AppDependencies = {}) {
   const readinessChecker = dependencies.readinessChecker ?? createReadinessChecker(config.redisUrl);
   const userService = dependencies.userService ?? new PrismaUserService();
   const permissionService = dependencies.permissionService ?? new PrismaPermissionService();
+  const m8JobScheduler =
+    dependencies.m8JobScheduler ??
+    new PrismaM8JobScheduler(new BullMqM8QueueAdapter(config.redisUrl));
   const folderService =
-    dependencies.folderService ?? new PrismaFolderService(undefined, config.maxFolderDepth);
-  const fileService = dependencies.fileService ?? new PrismaFileService(permissionService);
+    dependencies.folderService ??
+    new PrismaFolderService(undefined, config.maxFolderDepth, m8JobScheduler);
+  const fileService =
+    dependencies.fileService ?? new PrismaFileService(permissionService, undefined, m8JobScheduler);
   const auditLogService = dependencies.auditLogService ?? new PrismaAuditLogService();
   const storageProvider =
     dependencies.storageProvider ??
@@ -89,6 +108,8 @@ export function createApp(dependencies: AppDependencies = {}) {
         multipartChunkSizeBytes: config.multipartChunkSizeBytes,
       },
       permissionService,
+      undefined,
+      m8JobScheduler,
     );
   const downloadService =
     dependencies.downloadService ??
@@ -103,6 +124,15 @@ export function createApp(dependencies: AppDependencies = {}) {
   const shareService = dependencies.shareService ?? new PrismaShareService(permissionService);
   const shareLinkService =
     dependencies.shareLinkService ?? new PrismaShareLinkService(permissionService, downloadService);
+  const searchService = dependencies.searchService ?? new PrismaSearchService();
+  const jobService = dependencies.jobService ?? new PrismaJobService();
+  const thumbnailService =
+    dependencies.thumbnailService ??
+    new PrismaThumbnailService(
+      storageProvider,
+      permissionService,
+      config.signedDownloadUrlTtlSeconds,
+    );
   const app = express();
 
   app.disable("x-powered-by");
@@ -127,7 +157,9 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use(meRouter(userService));
   app.use(foldersRouter(folderService, userService));
   app.use(uploadsRouter(uploadService, userService));
-  app.use(filesRouter(fileService, userService, downloadService, versionService));
+  app.use(filesRouter(fileService, userService, downloadService, versionService, thumbnailService));
+  app.use(searchRouter(searchService, userService));
+  app.use(jobsRouter(jobService, userService));
   app.use(sharesRouter(shareService, userService));
   app.use(shareLinksRouter(shareLinkService, userService));
   app.use(publicRouter(shareLinkService));

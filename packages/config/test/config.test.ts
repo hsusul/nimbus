@@ -18,6 +18,8 @@ describe("config validation", () => {
     expect(config.UPLOAD_SESSION_TTL_SECONDS).toBe(86400);
     expect(config.MULTIPART_UPLOAD_THRESHOLD_BYTES).toBe(67108864);
     expect(config.MULTIPART_CHUNK_SIZE_BYTES).toBe(8388608);
+    expect(config.THUMBNAIL_MAX_INPUT_BYTES).toBe(20971520);
+    expect(config.THUMBNAIL_MAX_PIXEL_COUNT).toBe(40000000);
   });
 
   it("parses service-specific config", () => {

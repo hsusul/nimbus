@@ -94,6 +94,11 @@ const testConfig: ApiConfig = {
 const runId = `m7-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const prisma = getPrismaClient();
 const storage = new SharingStorageProvider();
+const m8JobScheduler = {
+  scheduleMetadata: async () => "m8-metadata-test-job",
+  scheduleThumbnail: async () => "m8-thumbnail-test-job",
+  scheduleCleanup: async () => "m8-cleanup-test-job",
+};
 const app = createApp({
   config: testConfig,
   readinessChecker: async () => ({ postgres: true, redis: true }),
@@ -101,6 +106,7 @@ const app = createApp({
   uploadFinalizationQueue: {
     enqueueUploadFinalization: async () => ({ bullmqJobId: "unused" }),
   },
+  m8JobScheduler,
 });
 
 function authHeaders(userSlug: string) {
@@ -194,11 +200,11 @@ async function cleanupRunData() {
   });
   await prisma.shareLink.deleteMany({ where: { createdById: { in: userIds } } });
   await prisma.auditLog.deleteMany({ where: { actorUserId: { in: userIds } } });
+  await prisma.thumbnail.deleteMany({ where: { ownerId: { in: userIds } } });
   await prisma.fileVersion.deleteMany({ where: { createdById: { in: userIds } } });
   await prisma.backgroundJob.deleteMany({
     where: {
-      resourceType: "upload_session",
-      uploadSession: { ownerId: { in: userIds } },
+      ownerId: { in: userIds },
     },
   });
   await prisma.uploadSession.deleteMany({ where: { ownerId: { in: userIds } } });
@@ -494,6 +500,7 @@ describe.sequential("M7 sharing", () => {
     const unrelatedFile = await createAvailableFile(owner, "private.txt");
     const backgroundJob = await prisma.backgroundJob.create({
       data: {
+        ownerId: owner.id,
         queueName: "test-public-metadata",
         resourceType: "upload_session",
         resourceId: sharedFile.uploadSessionId,
@@ -644,6 +651,7 @@ describe.sequential("M7 sharing", () => {
       uploadFinalizationQueue: {
         enqueueUploadFinalization: async () => ({ bullmqJobId: "unused" }),
       },
+      m8JobScheduler,
       logger: createLogger({ service: "sharing-logger-test", sink: (line) => lines.push(line) }),
     });
 
@@ -651,5 +659,68 @@ describe.sequential("M7 sharing", () => {
     const output = lines.join("\n");
     expect(output).not.toContain(rawToken);
     expect(output).toContain("[REDACTED]");
+  });
+
+  it("allows current direct viewers to sign thumbnails and blocks revoked/public access", async () => {
+    const owner = await ensureUser("thumbnail-owner");
+    const viewer = await ensureUser("thumbnail-viewer");
+    const file = await createAvailableFile(owner, "thumbnail.png");
+    const thumbnailObjectKey = `objects/${owner.id}/${file.fileId}/versions/${file.versionId}/derived/thumbnail.webp`;
+    await prisma.thumbnail.create({
+      data: {
+        ownerId: owner.id,
+        fileId: file.fileId,
+        fileVersionId: file.versionId,
+        status: "complete",
+        bucket: "nimbus-test",
+        objectKey: thumbnailObjectKey,
+        width: 120,
+        height: 80,
+        sizeBytes: 3n,
+        completedAt: new Date(),
+      },
+    });
+    const share = await request(app)
+      .post("/api/v1/shares")
+      .set(authHeaders("thumbnail-owner"))
+      .send({
+        resourceType: "file",
+        resourceId: file.fileId,
+        granteeEmail: viewer.email,
+        role: "viewer",
+      })
+      .expect(201);
+
+    const thumbnail = await request(app)
+      .get(`/api/v1/files/${file.fileId}/thumbnail`)
+      .set(authHeaders("thumbnail-viewer"))
+      .expect(200);
+    expect(thumbnail.body.data).toMatchObject({
+      fileId: file.fileId,
+      fileVersionId: file.versionId,
+      mimeType: "image/webp",
+      width: 120,
+      height: 80,
+      sizeBytes: "3",
+    });
+
+    const publicLink = await request(app)
+      .post("/api/v1/share-links")
+      .set(authHeaders("thumbnail-owner"))
+      .send({ resourceType: "file", resourceId: file.fileId })
+      .expect(201);
+    const publicMetadata = await request(app)
+      .get(`/api/v1/public/${publicLink.body.data.token}`)
+      .expect(200);
+    expect(publicMetadata.body.data).not.toHaveProperty("thumbnail");
+
+    await request(app)
+      .delete(`/api/v1/shares/${share.body.data.id}`)
+      .set(authHeaders("thumbnail-owner"))
+      .expect(200);
+    await request(app)
+      .get(`/api/v1/files/${file.fileId}/thumbnail`)
+      .set(authHeaders("thumbnail-viewer"))
+      .expect(404);
   });
 });

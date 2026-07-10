@@ -1,8 +1,18 @@
-import { UPLOAD_FINALIZATION_QUEUE_NAME } from "@nimbus/contracts";
+import {
+  METADATA_INDEXING_QUEUE_NAME,
+  OBJECT_CLEANUP_QUEUE_NAME,
+  THUMBNAIL_GENERATION_QUEUE_NAME,
+  UPLOAD_FINALIZATION_QUEUE_NAME,
+} from "@nimbus/contracts";
 import { Queue, type ConnectionOptions } from "bullmq";
 import IORedis from "ioredis";
 
-export const registeredQueues = [UPLOAD_FINALIZATION_QUEUE_NAME] as const;
+export const registeredQueues = [
+  UPLOAD_FINALIZATION_QUEUE_NAME,
+  METADATA_INDEXING_QUEUE_NAME,
+  THUMBNAIL_GENERATION_QUEUE_NAME,
+  OBJECT_CLEANUP_QUEUE_NAME,
+] as const;
 
 export type RegisteredQueueName = (typeof registeredQueues)[number];
 
@@ -26,8 +36,8 @@ export function createBullMqConnectionOptions(redisUrl: string): ConnectionOptio
   };
 }
 
-export function createQueue(name: RegisteredQueueName, redisUrl: string): Queue {
-  return new Queue(name, {
+export function createQueue<T>(name: RegisteredQueueName, redisUrl: string): Queue<T> {
+  return new Queue<T>(name, {
     connection: createBullMqConnectionOptions(redisUrl),
   });
 }

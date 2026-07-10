@@ -9,6 +9,7 @@ import { enqueueUploadCompletion } from "../apps/api/src/services/uploads/comple
 import { startUpload } from "../apps/api/src/services/uploads/start-upload";
 import type { UploadFinalizationQueue } from "../apps/api/src/services/queue";
 import { PrismaUserService } from "../apps/api/src/services/users";
+import { PrismaPermissionService } from "../apps/api/src/services/permission-service";
 
 const config = getApiConfig();
 const prisma = getPrismaClient();
@@ -19,6 +20,7 @@ const storage = new S3CompatibleStorageProvider({
   secretKey: config.storage.secretKey,
 });
 const userService = new PrismaUserService(prisma);
+const permissionService = new PrismaPermissionService(prisma);
 const runId = `multipart-smoke-${Date.now()}-${randomUUID()}`;
 const partOne = Buffer.alloc(5 * 1024 * 1024, "a");
 const partTwo = Buffer.from("nimbus-minio-multipart-smoke\n");
@@ -55,6 +57,7 @@ try {
   const started = await startUpload(
     actor,
     {
+      uploadMode: "new_file",
       folderId: actor.rootFolderId,
       filename: `multipart-smoke-${Date.now()}.bin`,
       mimeType: "application/octet-stream",
@@ -72,6 +75,7 @@ try {
       multipartUploadThresholdBytes: config.multipartUploadThresholdBytes,
       multipartChunkSizeBytes: config.multipartChunkSizeBytes,
     },
+    permissionService,
     prisma,
   );
 
@@ -221,10 +225,7 @@ async function cleanupSmokeRows(authSubject: string) {
   });
   await prisma.backgroundJob.deleteMany({
     where: {
-      resourceType: "upload_session",
-      uploadSession: {
-        ownerId: user.id,
-      },
+      ownerId: user.id,
     },
   });
   await prisma.uploadChunk.deleteMany({

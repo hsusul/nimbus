@@ -4,9 +4,12 @@ export * from "./audit";
 export * from "./downloads";
 export * from "./files";
 export * from "./folders";
+export * from "./jobs";
 export * from "./pagination";
 export * from "./queues";
+export * from "./search";
 export * from "./sharing";
+export * from "./thumbnails";
 export * from "./uploads";
 
 export const ErrorEnvelopeSchema = z.object({

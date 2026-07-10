@@ -177,11 +177,8 @@ async function cleanupRunData() {
   });
   await prisma.backgroundJob.deleteMany({
     where: {
-      resourceType: "upload_session",
-      uploadSession: {
-        ownerId: {
-          in: userIds,
-        },
+      ownerId: {
+        in: userIds,
       },
     },
   });
@@ -1041,6 +1038,7 @@ async function createUploadFixture(
   });
   const backgroundJob = await prisma.backgroundJob.create({
     data: {
+      ownerId: user.id,
       queueName: UPLOAD_FINALIZATION_QUEUE_NAME,
       resourceType: "upload_session",
       resourceId: uploadSession.id,
@@ -1167,6 +1165,7 @@ async function createNewVersionUploadFixture(
   });
   const backgroundJob = await prisma.backgroundJob.create({
     data: {
+      ownerId: user.id,
       queueName: UPLOAD_FINALIZATION_QUEUE_NAME,
       resourceType: "upload_session",
       resourceId: uploadSession.id,

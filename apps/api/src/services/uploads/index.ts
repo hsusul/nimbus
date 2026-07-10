@@ -6,6 +6,7 @@ import { HttpError } from "../../middleware/error-handler";
 import type { AuditContext } from "../audit-log";
 import type { UploadFinalizationQueue } from "../queue";
 import type { PermissionService } from "../permission-service";
+import type { M8JobScheduler } from "../m8-jobs";
 import type { InternalUser } from "../users";
 import { cancelUpload, type UploadCancelResult } from "./cancel-upload";
 import { registerUploadChunk, type RegisterUploadChunkResult } from "./chunks";
@@ -63,6 +64,7 @@ export class PrismaUploadService implements UploadService {
     private readonly options: UploadServiceOptions,
     private readonly permissionService: PermissionService,
     private readonly prisma: PrismaClient = getPrismaClient(),
+    private readonly m8Jobs?: M8JobScheduler,
   ) {}
 
   startUpload(
@@ -91,7 +93,21 @@ export class PrismaUploadService implements UploadService {
       this.permissionService,
       this.prisma,
     );
-    return getUploadSessionDetail(actor, uploadSessionId, this.storage, this.options, this.prisma);
+    const result = await getUploadSessionDetail(
+      actor,
+      uploadSessionId,
+      this.storage,
+      this.options,
+      this.prisma,
+    );
+    if (result.status === "expired") {
+      await this.m8Jobs?.scheduleCleanup({
+        ownerId: actor.id,
+        uploadSessionId,
+        correlationId: result.correlationId,
+      });
+    }
+    return result;
   }
 
   async getUploadChunks(actor: InternalUser, uploadSessionId: string): Promise<UploadChunksResult> {
@@ -149,7 +165,19 @@ export class PrismaUploadService implements UploadService {
       this.permissionService,
       this.prisma,
     );
-    return cancelUpload(actor, uploadSessionId, auditContext, this.storage, this.prisma);
+    const result = await cancelUpload(
+      actor,
+      uploadSessionId,
+      auditContext,
+      this.storage,
+      this.prisma,
+    );
+    await this.m8Jobs?.scheduleCleanup({
+      ownerId: actor.id,
+      uploadSessionId,
+      correlationId: result.correlationId,
+    });
+    return result;
   }
 }
 

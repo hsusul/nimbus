@@ -7,9 +7,11 @@ export type {
   Folder,
   Share,
   ShareLink,
+  Thumbnail,
   UploadChunk,
   UploadSession,
   User,
 } from "@prisma/client";
 export { checkDatabase } from "./health";
 export { createPrismaClient, disconnectPrismaClient, getPrismaClient } from "./client";
+export { buildFileSearchDocument, buildFolderSearchDocument } from "./search-document";

@@ -35,9 +35,15 @@ const testConfig: ApiConfig = {
 
 const runId = `m2-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const prisma = getPrismaClient();
+const m8JobScheduler = {
+  scheduleMetadata: async () => "m8-metadata-test-job",
+  scheduleThumbnail: async () => "m8-thumbnail-test-job",
+  scheduleCleanup: async () => "m8-cleanup-test-job",
+};
 const app = createApp({
   config: testConfig,
   readinessChecker: async () => ({ postgres: true, redis: true }),
+  m8JobScheduler,
 });
 
 function authHeaders(userSlug: string) {

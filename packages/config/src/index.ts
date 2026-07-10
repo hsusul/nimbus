@@ -89,12 +89,44 @@ const webEnvSchema = z.object({
   NEXT_PUBLIC_API_BASE_URL: z.string().url().optional().default("http://localhost:4000"),
 });
 
+const workerEnvSchema = z.object({
+  THUMBNAIL_MAX_INPUT_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(104857600)
+    .optional()
+    .default(20971520),
+  THUMBNAIL_MAX_PIXEL_COUNT: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(100000000)
+    .optional()
+    .default(40000000),
+  THUMBNAIL_MAX_WIDTH: z.coerce.number().int().positive().max(30000).optional().default(12000),
+  THUMBNAIL_MAX_HEIGHT: z.coerce.number().int().positive().max(30000).optional().default(12000),
+  THUMBNAIL_OUTPUT_WIDTH: z.coerce.number().int().positive().max(2048).optional().default(320),
+  THUMBNAIL_OUTPUT_HEIGHT: z.coerce.number().int().positive().max(2048).optional().default(320),
+  THUMBNAIL_PROCESSING_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .max(120000)
+    .optional()
+    .default(15000),
+  METADATA_INDEXING_CONCURRENCY: z.coerce.number().int().min(1).max(20).optional().default(5),
+  THUMBNAIL_GENERATION_CONCURRENCY: z.coerce.number().int().min(1).max(8).optional().default(2),
+  OBJECT_CLEANUP_CONCURRENCY: z.coerce.number().int().min(1).max(20).optional().default(3),
+});
+
 export const appEnvSchema = baseEnvSchema
   .merge(dbEnvSchema)
   .merge(redisEnvSchema)
   .merge(storageEnvSchema)
   .merge(apiEnvSchema)
-  .merge(webEnvSchema);
+  .merge(webEnvSchema)
+  .merge(workerEnvSchema);
 
 export type AppConfig = z.infer<typeof appEnvSchema>;
 export type ApiConfig = ReturnType<typeof getApiConfig>;
@@ -141,6 +173,20 @@ export function getWorkerConfig(env: NodeJS.ProcessEnv = process.env) {
     databaseUrl: config.DATABASE_URL,
     redisUrl: config.REDIS_URL,
     storage: getStorageConfig(env),
+    thumbnail: {
+      maxInputBytes: config.THUMBNAIL_MAX_INPUT_BYTES,
+      maxPixelCount: config.THUMBNAIL_MAX_PIXEL_COUNT,
+      maxWidth: config.THUMBNAIL_MAX_WIDTH,
+      maxHeight: config.THUMBNAIL_MAX_HEIGHT,
+      outputWidth: config.THUMBNAIL_OUTPUT_WIDTH,
+      outputHeight: config.THUMBNAIL_OUTPUT_HEIGHT,
+      processingTimeoutMs: config.THUMBNAIL_PROCESSING_TIMEOUT_MS,
+    },
+    concurrency: {
+      metadataIndexing: config.METADATA_INDEXING_CONCURRENCY,
+      thumbnailGeneration: config.THUMBNAIL_GENERATION_CONCURRENCY,
+      objectCleanup: config.OBJECT_CLEANUP_CONCURRENCY,
+    },
   };
 }
 

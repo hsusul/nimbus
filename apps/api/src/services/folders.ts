@@ -5,6 +5,7 @@ import type {
   FolderUpdateRequest,
 } from "@nimbus/contracts";
 import {
+  buildFolderSearchDocument,
   type File as PrismaFile,
   type Folder as PrismaFolder,
   getPrismaClient,
@@ -18,6 +19,7 @@ import { appendAuditLog, type AuditContext } from "./audit-log";
 import { assertMoveDoesNotCreateCycle, type FolderAncestor } from "./folder-cycle";
 import { decodeCursor, toPage, type Page } from "./pagination";
 import { normalizeResourceName } from "./resource-names";
+import type { M8JobScheduler } from "./m8-jobs";
 
 type TransactionClient = Prisma.TransactionClient;
 
@@ -98,6 +100,7 @@ export class PrismaFolderService implements FolderService {
   constructor(
     private readonly prisma: PrismaClient = getPrismaClient(),
     private readonly maxFolderDepth = 32,
+    private readonly m8Jobs?: M8JobScheduler,
   ) {}
 
   async createFolder(
@@ -108,7 +111,7 @@ export class PrismaFolderService implements FolderService {
     const name = normalizeResourceName(input.name);
     const parentFolderId = input.parentFolderId ?? actor.rootFolderId;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const parentFolder = await getActiveFolder(tx, actor.id, parentFolderId);
       const depth = parentFolder.depth + 1;
 
@@ -123,6 +126,7 @@ export class PrismaFolderService implements FolderService {
           normalizedName: name.normalizedName,
           depth,
           status: "active",
+          searchDocument: buildFolderSearchDocument(name.name),
         },
       });
 
@@ -139,6 +143,8 @@ export class PrismaFolderService implements FolderService {
 
       return mapFolder(folder);
     });
+    await this.scheduleMetadata(result, auditContext);
+    return result;
   }
 
   async getFolder(actor: InternalUser, folderId: string): Promise<FolderDto> {
@@ -232,7 +238,7 @@ export class PrismaFolderService implements FolderService {
 
     const name = normalizeResourceName(input.name);
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const folder = await getActiveFolder(tx, actor.id, folderId);
 
       if (!folder.parentFolderId) {
@@ -254,6 +260,7 @@ export class PrismaFolderService implements FolderService {
         data: {
           name: name.name,
           normalizedName: name.normalizedName,
+          searchDocument: buildFolderSearchDocument(name.name),
         },
       });
 
@@ -270,6 +277,8 @@ export class PrismaFolderService implements FolderService {
 
       return mapFolder(updatedFolder);
     });
+    await this.scheduleMetadata(result, auditContext);
+    return result;
   }
 
   async moveFolder(
@@ -278,7 +287,7 @@ export class PrismaFolderService implements FolderService {
     input: FolderMoveRequest,
     auditContext: AuditContext,
   ): Promise<FolderDto> {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const folder = await getActiveFolder(tx, actor.id, folderId);
       const targetParent = await getActiveFolder(tx, actor.id, input.parentFolderId);
 
@@ -322,6 +331,8 @@ export class PrismaFolderService implements FolderService {
 
       return mapFolder(updatedFolder);
     });
+    await this.scheduleMetadata(result, auditContext);
+    return result;
   }
 
   async deleteFolder(
@@ -329,7 +340,7 @@ export class PrismaFolderService implements FolderService {
     folderId: string,
     auditContext: AuditContext,
   ): Promise<FolderDto> {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const folder = await getActiveFolder(tx, actor.id, folderId);
 
       if (!folder.parentFolderId) {
@@ -359,6 +370,8 @@ export class PrismaFolderService implements FolderService {
 
       return mapFolder(deletedFolder);
     });
+    await this.scheduleMetadata(result, auditContext);
+    return result;
   }
 
   async restoreFolder(
@@ -366,7 +379,7 @@ export class PrismaFolderService implements FolderService {
     folderId: string,
     auditContext: AuditContext,
   ): Promise<FolderDto> {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const folder = await tx.folder.findFirst({
         where: {
           id: folderId,
@@ -416,6 +429,17 @@ export class PrismaFolderService implements FolderService {
       });
 
       return mapFolder(restoredFolder);
+    });
+    await this.scheduleMetadata(result, auditContext);
+    return result;
+  }
+
+  private async scheduleMetadata(folder: FolderDto, auditContext: AuditContext): Promise<void> {
+    await this.m8Jobs?.scheduleMetadata({
+      ownerId: folder.ownerId,
+      resourceType: "folder",
+      resourceId: folder.id,
+      correlationId: auditContext.correlationId ?? auditContext.requestId,
     });
   }
 }

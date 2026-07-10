@@ -2,7 +2,11 @@ export {
   S3CompatibleStorageProvider,
   type S3CompatibleStorageProviderOptions,
 } from "./minio-provider";
-export { buildSinglePartUploadObjectKey, buildVersionObjectKey } from "./object-keys";
+export {
+  buildSinglePartUploadObjectKey,
+  buildThumbnailObjectKey,
+  buildVersionObjectKey,
+} from "./object-keys";
 export {
   type AbortMultipartUploadInput,
   type CompleteMultipartUploadInput,
@@ -14,6 +18,7 @@ export {
   type SignedPartUploadUrlInput,
   type ObjectLocation,
   type ObjectMetadata,
+  type PutObjectInput,
   type ObjectStorageProvider,
   type SignedDownloadUrlInput,
   type SignedUploadUrlInput,

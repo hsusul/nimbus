@@ -158,11 +158,17 @@ const runId = `m3-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const prisma = getPrismaClient();
 const storage = new FakeObjectStorageProvider();
 const uploadFinalizationQueue = new FakeUploadFinalizationQueue();
+const m8JobScheduler = {
+  scheduleMetadata: async () => "m8-metadata-test-job",
+  scheduleThumbnail: async () => "m8-thumbnail-test-job",
+  scheduleCleanup: async () => "m8-cleanup-test-job",
+};
 const app = createApp({
   config: testConfig,
   readinessChecker: async () => ({ postgres: true, redis: true }),
   storageProvider: storage,
   uploadFinalizationQueue,
+  m8JobScheduler,
 });
 
 function authHeaders(userSlug: string) {
@@ -285,11 +291,8 @@ async function cleanupRunData() {
   });
   await prisma.backgroundJob.deleteMany({
     where: {
-      resourceType: "upload_session",
-      uploadSession: {
-        ownerId: {
-          in: userIds,
-        },
+      ownerId: {
+        in: userIds,
       },
     },
   });
@@ -1025,6 +1028,7 @@ describe.sequential("multipart resumable uploads", () => {
       readinessChecker: async () => ({ postgres: true, redis: true }),
       storageProvider: storage,
       uploadFinalizationQueue,
+      m8JobScheduler,
       logger: createLogger({
         service: "multipart-logger-test",
         level: "info",

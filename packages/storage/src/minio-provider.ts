@@ -22,6 +22,7 @@ import {
   type CreateMultipartUploadResult,
   type ObjectMetadata,
   type ObjectStorageProvider,
+  type PutObjectInput,
   type SignedPartUploadUrlInput,
   type SignedDownloadUrlInput,
   type SignedUploadUrlInput,
@@ -186,6 +187,40 @@ export class S3CompatibleStorageProvider implements ObjectStorageProvider {
         Key: input.objectKey,
       }),
     );
+  }
+
+  async readObject(input: ObjectLocation, maxBytes: number): Promise<Uint8Array> {
+    const result = await this.client.send(
+      new GetObjectCommand({
+        Bucket: input.bucket,
+        Key: input.objectKey,
+      }),
+    );
+
+    if (!result.Body) {
+      throw new ObjectNotFoundError(input.bucket, input.objectKey);
+    }
+
+    const bytes = await result.Body.transformToByteArray();
+    if (bytes.byteLength > maxBytes) {
+      throw new Error("object_size_limit_exceeded");
+    }
+
+    return bytes;
+  }
+
+  async writeObject(input: PutObjectInput): Promise<ObjectMetadata> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: input.bucket,
+        Key: input.objectKey,
+        Body: input.body,
+        ContentType: input.contentType,
+        ContentLength: input.body.byteLength,
+      }),
+    );
+
+    return this.headObject(input);
   }
 }
 

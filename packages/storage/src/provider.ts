@@ -75,6 +75,11 @@ export interface ObjectLocation {
   objectKey: string;
 }
 
+export interface PutObjectInput extends ObjectLocation {
+  body: Uint8Array;
+  contentType: string;
+}
+
 export interface ObjectStorageProvider {
   createSignedUploadUrl(input: SignedUploadUrlInput): Promise<SignedUrl>;
   createSignedDownloadUrl(input: SignedDownloadUrlInput): Promise<SignedUrl>;
@@ -86,6 +91,8 @@ export interface ObjectStorageProvider {
   abortMultipartUpload(input: AbortMultipartUploadInput): Promise<void>;
   headObject(input: ObjectLocation): Promise<ObjectMetadata>;
   deleteObject(input: ObjectLocation): Promise<void>;
+  readObject?(input: ObjectLocation, maxBytes: number): Promise<Uint8Array>;
+  writeObject?(input: PutObjectInput): Promise<ObjectMetadata>;
 }
 
 export class ObjectNotFoundError extends Error {

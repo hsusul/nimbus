@@ -3,7 +3,7 @@ import {
   UPLOAD_FINALIZATION_QUEUE_NAME,
   type UploadFinalizationJobPayload,
 } from "@nimbus/contracts";
-import { getPrismaClient, Prisma, type PrismaClient } from "@nimbus/db";
+import { buildFileSearchDocument, getPrismaClient, Prisma, type PrismaClient } from "@nimbus/db";
 import {
   ObjectNotFoundError,
   type ObjectMetadata,
@@ -223,6 +223,7 @@ export async function finalizeUploadSession(
         data: {
           status: "succeeded",
           lastError: null,
+          failureCode: null,
           correlationId,
           completedAt: new Date(),
         },
@@ -238,6 +239,7 @@ export async function finalizeUploadSession(
         data: {
           status: "failed",
           lastError: `upload_not_ready:${lockedSession.status}`,
+          failureCode: "upload_not_ready",
           correlationId,
           completedAt: new Date(),
         },
@@ -312,6 +314,11 @@ export async function finalizeUploadSession(
           sizeBytes: existingVersion.sizeBytes,
           contentHash: existingVersion.sha256,
           mimeType: existingVersion.mimeType,
+          searchDocument: buildFileSearchDocument({
+            name: targetFile.name,
+            extension: targetFile.extension,
+            mimeType: existingVersion.mimeType,
+          }),
         },
       });
       await tx.uploadSession.update({
@@ -332,6 +339,7 @@ export async function finalizeUploadSession(
         data: {
           status: "succeeded",
           lastError: null,
+          failureCode: null,
           correlationId,
           completedAt: new Date(),
         },
@@ -367,6 +375,11 @@ export async function finalizeUploadSession(
         sizeBytes: objectMetadata.sizeBytes,
         contentHash: fileVersion.sha256,
         mimeType: lockedSession.mimeType,
+        searchDocument: buildFileSearchDocument({
+          name: targetFile.name,
+          extension: targetFile.extension,
+          mimeType: lockedSession.mimeType,
+        }),
       },
     });
 
@@ -388,6 +401,7 @@ export async function finalizeUploadSession(
       data: {
         status: "succeeded",
         lastError: null,
+        failureCode: null,
         correlationId,
         completedAt: new Date(),
       },
@@ -537,6 +551,11 @@ async function completeWithExistingVersion(
         sizeBytes: fileVersion.sizeBytes,
         contentHash: fileVersion.sha256,
         mimeType: fileVersion.mimeType,
+        searchDocument: buildFileSearchDocument({
+          name: targetFile.name,
+          extension: targetFile.extension,
+          mimeType: fileVersion.mimeType,
+        }),
       },
     });
     await tx.uploadSession.update({
@@ -557,6 +576,7 @@ async function completeWithExistingVersion(
       data: {
         status: "succeeded",
         lastError: null,
+        failureCode: null,
         correlationId,
         completedAt: new Date(),
       },
@@ -566,7 +586,6 @@ async function completeWithExistingVersion(
 
 export async function markUploadFinalizationJobDeadLettered(
   backgroundJobId: string,
-  error: unknown,
   prisma: PrismaClient = getPrismaClient(),
 ) {
   await prisma.backgroundJob.update({
@@ -575,7 +594,8 @@ export async function markUploadFinalizationJobDeadLettered(
     },
     data: {
       status: "dead_lettered",
-      lastError: error instanceof Error ? error.message : String(error),
+      lastError: "worker_retries_exhausted",
+      failureCode: "worker_retries_exhausted",
       completedAt: new Date(),
     },
   });
@@ -588,6 +608,10 @@ async function markJobRunning(prisma: PrismaClient, backgroundJobId: string) {
     },
     data: {
       status: "running",
+      startedAt: new Date(),
+      completedAt: null,
+      failureCode: null,
+      lastError: null,
       attempts: {
         increment: 1,
       },
@@ -607,6 +631,7 @@ async function markJobSucceeded(
     data: {
       status: "succeeded",
       lastError: null,
+      failureCode: null,
       correlationId,
       completedAt: new Date(),
     },
@@ -626,6 +651,7 @@ async function markJobFailed(
     data: {
       status: "failed",
       lastError,
+      failureCode: sanitizeFailureCode(lastError),
       correlationId,
       completedAt: new Date(),
     },
@@ -673,6 +699,7 @@ async function failUploadTerminal(
       data: {
         status: "failed",
         lastError: failureReason,
+        failureCode: sanitizeFailureCode(failureReason),
         correlationId,
         completedAt: new Date(),
       },
@@ -704,6 +731,7 @@ async function markUploadAndJobFailed(
     data: {
       status: "failed",
       lastError: failureReason,
+      failureCode: sanitizeFailureCode(failureReason),
       correlationId,
       completedAt: new Date(),
     },
@@ -788,6 +816,15 @@ async function hasCurrentFileWritePermission(
 
 function getHeadSha256(metadata: ObjectMetadata): string | null {
   return metadata.metadata["sha256"] ?? metadata.metadata["nimbus-sha256"] ?? null;
+}
+
+function sanitizeFailureCode(value: string): string {
+  return (
+    value
+      .split(":", 1)[0]
+      ?.replace(/[^a-z0-9_]/gi, "_")
+      .toLowerCase() || "job_failed"
+  );
 }
 
 function getMissingPartNumbers(input: {

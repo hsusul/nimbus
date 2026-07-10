@@ -3,6 +3,7 @@ import {
   FileCreateRequestSchema,
   FileMoveRequestSchema,
   FileUpdateRequestSchema,
+  ThumbnailDownloadResponseSchema,
 } from "@nimbus/contracts";
 import type { Router } from "express";
 import { Router as createRouter } from "express";
@@ -12,6 +13,7 @@ import type { DownloadService } from "../services/downloads";
 import type { FileService } from "../services/files";
 import type { UserService } from "../services/users";
 import type { VersionService } from "../services/versions";
+import type { ThumbnailService } from "../services/thumbnails";
 import { getAuditContext, requireActiveInternalUser } from "./route-context";
 
 const FileListQuerySchema = CursorPaginationQuerySchema.extend({
@@ -23,6 +25,7 @@ export function filesRouter(
   userService: UserService,
   downloadService: DownloadService,
   versionService: VersionService,
+  thumbnailService: ThumbnailService,
 ): Router {
   const router = createRouter();
 
@@ -85,6 +88,20 @@ export function filesRouter(
           pageInfo: page.pageInfo,
         },
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/api/v1/files/:fileId/thumbnail", async (req, res, next) => {
+    try {
+      const actor = await requireActiveInternalUser(req, userService);
+      const thumbnail = await thumbnailService.createThumbnailDownload(
+        actor,
+        req.params.fileId,
+        getAuditContext(req, actor.id),
+      );
+      res.json(ThumbnailDownloadResponseSchema.parse({ data: thumbnail }));
     } catch (error) {
       next(error);
     }

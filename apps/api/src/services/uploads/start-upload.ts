@@ -1,5 +1,5 @@
 import type { UploadStartRequest } from "@nimbus/contracts";
-import { getPrismaClient, Prisma, type PrismaClient } from "@nimbus/db";
+import { buildFileSearchDocument, getPrismaClient, Prisma, type PrismaClient } from "@nimbus/db";
 import { buildVersionObjectKey, type ObjectStorageProvider } from "@nimbus/storage";
 import { randomUUID } from "node:crypto";
 
@@ -143,6 +143,11 @@ export async function startUpload(
           status: "uploading",
           sizeBytes: totalSizeBytes,
           contentHash: expectedSha256 ?? null,
+          searchDocument: buildFileSearchDocument({
+            name: name.name,
+            extension: name.extension,
+            mimeType: input.mimeType,
+          }),
         },
       });
       const session = await createUploadSession(tx, {

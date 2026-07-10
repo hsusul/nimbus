@@ -4,7 +4,13 @@ import type {
   FileMoveRequest,
   FileUpdateRequest,
 } from "@nimbus/contracts";
-import { type File as PrismaFile, getPrismaClient, Prisma, type PrismaClient } from "@nimbus/db";
+import {
+  buildFileSearchDocument,
+  type File as PrismaFile,
+  getPrismaClient,
+  Prisma,
+  type PrismaClient,
+} from "@nimbus/db";
 
 import { HttpError } from "../middleware/error-handler";
 import type { InternalUser } from "./users";
@@ -12,6 +18,7 @@ import { appendAuditLog, type AuditContext } from "./audit-log";
 import { decodeCursor, toPage, type Page } from "./pagination";
 import { normalizeResourceName } from "./resource-names";
 import type { PermissionService } from "./permission-service";
+import type { M8JobScheduler } from "./m8-jobs";
 
 type TransactionClient = Prisma.TransactionClient;
 
@@ -63,6 +70,7 @@ export class PrismaFileService implements FileService {
   constructor(
     private readonly permissionService: PermissionService,
     private readonly prisma: PrismaClient = getPrismaClient(),
+    private readonly m8Jobs?: M8JobScheduler,
   ) {}
 
   async createFile(
@@ -74,7 +82,7 @@ export class PrismaFileService implements FileService {
     const folderId = input.folderId ?? actor.rootFolderId;
     const sizeBytes = parseSizeBytes(input.sizeBytes);
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       await getActiveFolder(tx, actor.id, folderId);
       await assertFileNameAvailable(tx, actor.id, folderId, name.normalizedName);
 
@@ -88,6 +96,11 @@ export class PrismaFileService implements FileService {
           mimeType: input.mimeType ?? null,
           sizeBytes,
           status: "active",
+          searchDocument: buildFileSearchDocument({
+            name: name.name,
+            extension: name.extension,
+            mimeType: input.mimeType,
+          }),
         },
       });
 
@@ -106,6 +119,8 @@ export class PrismaFileService implements FileService {
 
       return mapFile(file);
     });
+    await this.scheduleMetadata(result, auditContext);
+    return result;
   }
 
   async getFile(actor: InternalUser, fileId: string): Promise<FileDto> {
@@ -169,7 +184,7 @@ export class PrismaFileService implements FileService {
       resourceId: fileId,
     });
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const file = await getActiveFile(tx, grant.file.ownerId, fileId);
       const name = input.name ? normalizeResourceName(input.name) : null;
 
@@ -200,6 +215,11 @@ export class PrismaFileService implements FileService {
                 mimeType: input.mimeType,
               }
             : {}),
+          searchDocument: buildFileSearchDocument({
+            name: name?.name ?? file.name,
+            extension: name?.extension ?? file.extension,
+            mimeType: input.mimeType === undefined ? file.mimeType : input.mimeType,
+          }),
         },
       });
 
@@ -218,6 +238,8 @@ export class PrismaFileService implements FileService {
 
       return mapFile(updatedFile);
     });
+    await this.scheduleMetadata(result, auditContext);
+    return result;
   }
 
   async moveFile(
@@ -231,7 +253,7 @@ export class PrismaFileService implements FileService {
       resourceId: fileId,
     });
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const file = await getActiveFile(tx, grant.file.ownerId, fileId);
 
       await getActiveFolder(tx, file.ownerId, input.folderId);
@@ -259,6 +281,8 @@ export class PrismaFileService implements FileService {
 
       return mapFile(updatedFile);
     });
+    await this.scheduleMetadata(result, auditContext);
+    return result;
   }
 
   async deleteFile(
@@ -271,7 +295,7 @@ export class PrismaFileService implements FileService {
       resourceId: fileId,
     });
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const file = await getActiveFile(tx, grant.file.ownerId, fileId);
       const deletedFile = await tx.file.update({
         where: {
@@ -296,6 +320,8 @@ export class PrismaFileService implements FileService {
 
       return mapFile(deletedFile);
     });
+    await this.scheduleMetadata(result, auditContext);
+    return result;
   }
 
   async restoreFile(
@@ -303,7 +329,7 @@ export class PrismaFileService implements FileService {
     fileId: string,
     auditContext: AuditContext,
   ): Promise<FileDto> {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const file = await tx.file.findFirst({
         where: {
           id: fileId,
@@ -343,6 +369,17 @@ export class PrismaFileService implements FileService {
       });
 
       return mapFile(restoredFile);
+    });
+    await this.scheduleMetadata(result, auditContext);
+    return result;
+  }
+
+  private async scheduleMetadata(file: FileDto, auditContext: AuditContext): Promise<void> {
+    await this.m8Jobs?.scheduleMetadata({
+      ownerId: file.ownerId,
+      resourceType: "file",
+      resourceId: file.id,
+      correlationId: auditContext.correlationId ?? auditContext.requestId,
     });
   }
 }
