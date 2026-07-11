@@ -2,6 +2,7 @@ services:
   - type: web
     name: nimbus-api
     runtime: docker
+    plan: free
     dockerfilePath: ./apps/api/Dockerfile
     dockerContext: .
     autoDeployTrigger: checksPass
@@ -54,55 +55,14 @@ services:
       - key: S3_FORCE_PATH_STYLE
         value: false
 
-  - type: worker
-    name: nimbus-worker
-    runtime: docker
-    dockerfilePath: ./apps/worker/Dockerfile
-    dockerContext: .
-    autoDeployTrigger: checksPass
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: DEPLOYMENT_PROFILE
-        value: production
-      - key: LOG_LEVEL
-        value: info
-      - key: DATABASE_URL
-        fromDatabase:
-          name: nimbus-postgres
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: nimbus-redis
-          property: connectionString
-      - key: S3_ENDPOINT
-        sync: false
-      - key: S3_ACCESS_KEY_ID
-        sync: false
-      - key: S3_SECRET_ACCESS_KEY
-        sync: false
-      - key: S3_BUCKET
-        sync: false
-      - key: S3_REGION
-        value: auto
-      - key: S3_FORCE_PATH_STYLE
-        value: false
-      - key: UPLOAD_FINALIZATION_CONCURRENCY
-        value: 2
-      - key: METADATA_INDEXING_CONCURRENCY
-        value: 5
-      - key: THUMBNAIL_GENERATION_CONCURRENCY
-        value: 2
-      - key: OBJECT_CLEANUP_CONCURRENCY
-        value: 3
-
   - type: keyvalue
     name: nimbus-redis
+    plan: free
     ipAllowList: []
     maxmemoryPolicy: noeviction
 
 databases:
   - name: nimbus-postgres
+    plan: free
     databaseName: nimbus
     user: nimbus
