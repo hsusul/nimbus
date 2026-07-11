@@ -96,7 +96,47 @@ describe("config validation", () => {
       name: "Console User",
     });
     expect(
-      getWebConfig({ NODE_ENV: "production", WEB_DEV_AUTH_USER: "console-user" }).devAuth,
+      getWebConfig({
+        NODE_ENV: "production",
+        DEPLOYMENT_PROFILE: "local",
+        WEB_DEV_AUTH_USER: "console-user",
+      }).devAuth,
     ).toBeNull();
+  });
+
+  it("derives an explicit CI profile without production secrets", () => {
+    expect(loadConfig({ CI: "true" }).DEPLOYMENT_PROFILE).toBe("ci");
+  });
+
+  it("rejects insecure production defaults and dev authentication", () => {
+    expect(() =>
+      getWebConfig({
+        NODE_ENV: "production",
+        DEPLOYMENT_PROFILE: "production",
+        AUTH_MODE: "dev",
+      }),
+    ).toThrow(/Missing required production configuration|AUTH_MODE/);
+  });
+
+  it("loads a production web profile without database or storage credentials", () => {
+    const secret = "production-secret-value-that-is-long-enough-123";
+    const config = getWebConfig({
+      NODE_ENV: "production",
+      DEPLOYMENT_PROFILE: "production",
+      AUTH_MODE: "authjs",
+      DEV_AUTH_ENABLED: "false",
+      AUTH_TRUST_HOST: "true",
+      PUBLIC_WEB_URL: "https://nimbus.example.com",
+      PUBLIC_API_URL: "https://api.nimbus.example.com",
+      NEXT_PUBLIC_API_BASE_URL: "https://api.nimbus.example.com",
+      AUTH_SECRET: secret,
+      AUTH_GITHUB_ID: "github-client-id",
+      AUTH_GITHUB_SECRET: secret,
+      API_AUTH_SECRET: `${secret}-api`,
+    });
+
+    expect(config.deploymentProfile).toBe("production");
+    expect(config.authMode).toBe("authjs");
+    expect(config.devAuth).toBeNull();
   });
 });

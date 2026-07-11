@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: nimbus
+          POSTGRES_USER: nimbus
+          POSTGRES_PASSWORD: nimbus
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nimbus -d nimbus"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DEPLOYMENT_PROFILE: ci
+      DATABASE_URL: postgresql://nimbus:nimbus@localhost:5432/nimbus?schema=public
+      REDIS_URL: redis://localhost:6379
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_ACCESS_KEY: nimbus
+      MINIO_SECRET_KEY: nimbus-secret
+      MINIO_BUCKET: nimbus-local
+      MINIO_REGION: us-east-1
+      AUTH_MODE: dev
+      DEV_AUTH_ENABLED: true
+      CORS_ORIGIN: http://localhost:3000
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start MinIO and create bucket
+        run: docker compose up -d minio && docker compose run --rm minio-init
+      - run: pnpm db:generate
+      - run: pnpm db:deploy
+      - run: pnpm demo:reset
+      - run: pnpm demo:seed
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build:api
+      - run: pnpm build:worker
+      - run: pnpm --filter @nimbus/web build
+      - run: git diff --check

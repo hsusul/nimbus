@@ -7,6 +7,7 @@ import {
   FileSearch,
   FolderOpen,
   HardDrive,
+  LogOut,
   Menu,
   Search,
   Trash2,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { signOut } from "next-auth/react";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { NimbusApiClient, type ApiClientConfig } from "../lib/api-client";
@@ -166,6 +168,16 @@ export function ConsoleRuntime({
                     {user.displayName.slice(0, 1).toUpperCase()}
                     <span />
                   </div>
+                  {config.productionAuth ? (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Sign out"
+                      onClick={() => void signOut({ callbackUrl: "/sign-in" })}
+                    >
+                      <LogOut aria-hidden="true" size={18} />
+                    </Button>
+                  ) : null}
                 </div>
               </header>
               <header className="mobile-header">
@@ -191,6 +203,16 @@ export function ConsoleRuntime({
                 <div className="account-avatar account-avatar--mobile" aria-hidden="true">
                   {user.displayName.slice(0, 1).toUpperCase()}
                 </div>
+                {config.productionAuth ? (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Sign out"
+                    onClick={() => void signOut({ callbackUrl: "/sign-in" })}
+                  >
+                    <LogOut aria-hidden="true" size={18} />
+                  </Button>
+                ) : null}
               </header>
               <main id="main-content" tabIndex={-1}>
                 {children}

@@ -13,6 +13,7 @@ export interface M8QueueAdapter {
   enqueueMetadata(input: MetadataIndexingJobPayload): Promise<{ bullmqJobId: string }>;
   enqueueThumbnail(input: ThumbnailGenerationJobPayload): Promise<{ bullmqJobId: string }>;
   enqueueCleanup(input: ObjectCleanupJobPayload): Promise<{ bullmqJobId: string }>;
+  close?(): Promise<void>;
 }
 
 export interface M8JobScheduler {
@@ -63,6 +64,14 @@ export class BullMqM8QueueAdapter implements M8QueueAdapter {
   async enqueueCleanup(input: ObjectCleanupJobPayload) {
     const job = await this.cleanupQueue.add("cleanup", input, jobOptions(input.backgroundJobId));
     return { bullmqJobId: job.id ?? input.backgroundJobId };
+  }
+
+  async close() {
+    await Promise.all([
+      this.metadataQueue.close(),
+      this.thumbnailQueue.close(),
+      this.cleanupQueue.close(),
+    ]);
   }
 }
 

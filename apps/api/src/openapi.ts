@@ -1,0 +1,514 @@
+import {
+  AuditLogListResponseSchema,
+  CursorPaginationQuerySchema,
+  ErrorEnvelopeSchema,
+  FileCreateRequestSchema,
+  FileDownloadResponseSchema,
+  FileListResponseSchema,
+  FileMoveRequestSchema,
+  FileResponseSchema,
+  FileUpdateRequestSchema,
+  FileVersionsListResponseSchema,
+  FolderChildrenResponseSchema,
+  FolderCreateRequestSchema,
+  FolderMoveRequestSchema,
+  FolderResponseSchema,
+  FolderUpdateRequestSchema,
+  HealthResponseSchema,
+  JobDetailResponseSchema,
+  JobListQuerySchema,
+  JobListResponseSchema,
+  MeResponseSchema,
+  PublicShareQuerySchema,
+  PublicShareResponseSchema,
+  ReadinessResponseSchema,
+  RegisterUploadChunkRequestSchema,
+  RegisterUploadChunkResponseSchema,
+  RestoreFileVersionResponseSchema,
+  SearchQuerySchema,
+  SearchResponseSchema,
+  ShareCreateRequestSchema,
+  ShareLinkCreateRequestSchema,
+  ShareLinkCreateResponseSchema,
+  ShareLinkResponseSchema,
+  ShareListResponseSchema,
+  ShareResponseSchema,
+  ThumbnailDownloadResponseSchema,
+  TrashListResponseSchema,
+  UploadCancelResponseSchema,
+  UploadChunksResponseSchema,
+  UploadCompleteResponseSchema,
+  UploadSessionDetailResponseSchema,
+  UploadStartRequestSchema,
+  UploadStartResponseSchema,
+} from "@nimbus/contracts";
+import {
+  extendZodWithOpenApi,
+  OpenAPIRegistry,
+  OpenApiGeneratorV3,
+} from "@asteasolutions/zod-to-openapi";
+import { z, type ZodTypeAny } from "zod";
+
+extendZodWithOpenApi(z);
+
+interface RouteDefinition {
+  method: "get" | "post" | "patch" | "delete";
+  path: string;
+  summary: string;
+  tag: string;
+  response: ZodTypeAny;
+  status?: number;
+  body?: ZodTypeAny;
+  query?: z.AnyZodObject | z.ZodEffects<z.AnyZodObject>;
+  params?: string[];
+  public?: boolean;
+}
+
+export function createOpenApiDocument(publicApiUrl: string) {
+  const registry = new OpenAPIRegistry();
+  registry.registerComponent("securitySchemes", "bearerAuth", {
+    type: "http",
+    scheme: "bearer",
+    bearerFormat: "JWT",
+    description: "Short-lived Nimbus API token minted by the authenticated web tier.",
+  });
+  const errorSchema = registry.register("ErrorEnvelope", ErrorEnvelopeSchema);
+  const schemas = {
+    health: registry.register("HealthResponse", HealthResponseSchema),
+    readiness: registry.register("ReadinessResponse", ReadinessResponseSchema),
+    me: registry.register("MeResponse", MeResponseSchema),
+    folder: registry.register("FolderResponse", FolderResponseSchema),
+    folderChildren: registry.register("FolderChildrenResponse", FolderChildrenResponseSchema),
+    file: registry.register("FileResponse", FileResponseSchema),
+    files: registry.register("FileListResponse", FileListResponseSchema),
+    download: registry.register("FileDownloadResponse", FileDownloadResponseSchema),
+    versions: registry.register("FileVersionsListResponse", FileVersionsListResponseSchema),
+    restoreVersion: registry.register(
+      "RestoreFileVersionResponse",
+      RestoreFileVersionResponseSchema,
+    ),
+    thumbnail: registry.register("ThumbnailDownloadResponse", ThumbnailDownloadResponseSchema),
+    uploadStart: registry.register("UploadStartResponse", UploadStartResponseSchema),
+    upload: registry.register("UploadSessionDetailResponse", UploadSessionDetailResponseSchema),
+    chunks: registry.register("UploadChunksResponse", UploadChunksResponseSchema),
+    registerChunk: registry.register(
+      "RegisterUploadChunkResponse",
+      RegisterUploadChunkResponseSchema,
+    ),
+    uploadComplete: registry.register("UploadCompleteResponse", UploadCompleteResponseSchema),
+    uploadCancel: registry.register("UploadCancelResponse", UploadCancelResponseSchema),
+    search: registry.register("SearchResponse", SearchResponseSchema),
+    jobs: registry.register("JobListResponse", JobListResponseSchema),
+    job: registry.register("JobDetailResponse", JobDetailResponseSchema),
+    share: registry.register("ShareResponse", ShareResponseSchema),
+    shares: registry.register("ShareListResponse", ShareListResponseSchema),
+    shareLinkCreate: registry.register("ShareLinkCreateResponse", ShareLinkCreateResponseSchema),
+    shareLink: registry.register("ShareLinkResponse", ShareLinkResponseSchema),
+    publicShare: registry.register("PublicShareResponse", PublicShareResponseSchema),
+    trash: registry.register("TrashListResponse", TrashListResponseSchema),
+    auditLogs: registry.register("AuditLogListResponse", AuditLogListResponseSchema),
+  };
+
+  const routes: RouteDefinition[] = [
+    {
+      method: "get",
+      path: "/health",
+      summary: "Process liveness",
+      tag: "Operations",
+      response: schemas.health,
+      public: true,
+    },
+    {
+      method: "get",
+      path: "/ready",
+      summary: "Dependency readiness",
+      tag: "Operations",
+      response: schemas.readiness,
+      public: true,
+    },
+    {
+      method: "get",
+      path: "/api/v1/me",
+      summary: "Get the active internal user",
+      tag: "Authentication",
+      response: schemas.me,
+    },
+    {
+      method: "post",
+      path: "/api/v1/folders",
+      summary: "Create a folder",
+      tag: "Folders",
+      body: FolderCreateRequestSchema,
+      response: schemas.folder,
+      status: 201,
+    },
+    {
+      method: "get",
+      path: "/api/v1/folders/{folderId}",
+      summary: "Get folder metadata",
+      tag: "Folders",
+      params: ["folderId"],
+      response: schemas.folder,
+    },
+    {
+      method: "get",
+      path: "/api/v1/folders/{folderId}/children",
+      summary: "List folder children",
+      tag: "Folders",
+      params: ["folderId"],
+      query: CursorPaginationQuerySchema,
+      response: schemas.folderChildren,
+    },
+    {
+      method: "patch",
+      path: "/api/v1/folders/{folderId}",
+      summary: "Rename a folder",
+      tag: "Folders",
+      params: ["folderId"],
+      body: FolderUpdateRequestSchema,
+      response: schemas.folder,
+    },
+    {
+      method: "post",
+      path: "/api/v1/folders/{folderId}/move",
+      summary: "Move a folder",
+      tag: "Folders",
+      params: ["folderId"],
+      body: FolderMoveRequestSchema,
+      response: schemas.folder,
+    },
+    {
+      method: "delete",
+      path: "/api/v1/folders/{folderId}",
+      summary: "Move a folder to trash",
+      tag: "Folders",
+      params: ["folderId"],
+      response: schemas.folder,
+    },
+    {
+      method: "post",
+      path: "/api/v1/folders/{folderId}/restore",
+      summary: "Restore a folder",
+      tag: "Folders",
+      params: ["folderId"],
+      response: schemas.folder,
+    },
+    {
+      method: "get",
+      path: "/api/v1/files",
+      summary: "List files",
+      tag: "Files",
+      query: CursorPaginationQuerySchema.extend({ folderId: z.string().optional() }),
+      response: schemas.files,
+    },
+    {
+      method: "post",
+      path: "/api/v1/files",
+      summary: "Create file metadata",
+      tag: "Files",
+      body: FileCreateRequestSchema,
+      response: schemas.file,
+      status: 201,
+    },
+    {
+      method: "get",
+      path: "/api/v1/files/{fileId}",
+      summary: "Get authorized file metadata",
+      tag: "Files",
+      params: ["fileId"],
+      response: schemas.file,
+    },
+    {
+      method: "patch",
+      path: "/api/v1/files/{fileId}",
+      summary: "Update file metadata",
+      tag: "Files",
+      params: ["fileId"],
+      body: FileUpdateRequestSchema,
+      response: schemas.file,
+    },
+    {
+      method: "post",
+      path: "/api/v1/files/{fileId}/move",
+      summary: "Move a file",
+      tag: "Files",
+      params: ["fileId"],
+      body: FileMoveRequestSchema,
+      response: schemas.file,
+    },
+    {
+      method: "delete",
+      path: "/api/v1/files/{fileId}",
+      summary: "Move a file to trash",
+      tag: "Files",
+      params: ["fileId"],
+      response: schemas.file,
+    },
+    {
+      method: "post",
+      path: "/api/v1/files/{fileId}/restore",
+      summary: "Restore a file",
+      tag: "Files",
+      params: ["fileId"],
+      response: schemas.file,
+    },
+    {
+      method: "get",
+      path: "/api/v1/files/{fileId}/download",
+      summary: "Issue a short-lived file download URL",
+      tag: "Files",
+      params: ["fileId"],
+      response: schemas.download,
+    },
+    {
+      method: "get",
+      path: "/api/v1/files/{fileId}/thumbnail",
+      summary: "Issue a short-lived thumbnail URL",
+      tag: "Files",
+      params: ["fileId"],
+      response: schemas.thumbnail,
+    },
+    {
+      method: "get",
+      path: "/api/v1/files/{fileId}/versions",
+      summary: "List immutable file versions",
+      tag: "Versions",
+      params: ["fileId"],
+      query: CursorPaginationQuerySchema,
+      response: schemas.versions,
+    },
+    {
+      method: "post",
+      path: "/api/v1/files/{fileId}/versions/{versionId}/restore",
+      summary: "Restore a prior version pointer",
+      tag: "Versions",
+      params: ["fileId", "versionId"],
+      response: schemas.restoreVersion,
+    },
+    {
+      method: "post",
+      path: "/api/v1/uploads/start",
+      summary: "Start a single-part or multipart upload",
+      tag: "Uploads",
+      body: UploadStartRequestSchema,
+      response: schemas.uploadStart,
+      status: 201,
+    },
+    {
+      method: "get",
+      path: "/api/v1/uploads/{uploadSessionId}",
+      summary: "Get upload status and missing parts",
+      tag: "Uploads",
+      params: ["uploadSessionId"],
+      response: schemas.upload,
+    },
+    {
+      method: "get",
+      path: "/api/v1/uploads/{uploadSessionId}/chunks",
+      summary: "List durable multipart chunks",
+      tag: "Uploads",
+      params: ["uploadSessionId"],
+      response: schemas.chunks,
+    },
+    {
+      method: "post",
+      path: "/api/v1/uploads/{uploadSessionId}/chunks",
+      summary: "Register an uploaded multipart chunk",
+      tag: "Uploads",
+      params: ["uploadSessionId"],
+      body: RegisterUploadChunkRequestSchema,
+      response: schemas.registerChunk,
+      status: 201,
+    },
+    {
+      method: "post",
+      path: "/api/v1/uploads/{uploadSessionId}/complete",
+      summary: "Queue worker-driven upload completion",
+      tag: "Uploads",
+      params: ["uploadSessionId"],
+      response: schemas.uploadComplete,
+    },
+    {
+      method: "post",
+      path: "/api/v1/uploads/{uploadSessionId}/cancel",
+      summary: "Cancel and clean up an upload",
+      tag: "Uploads",
+      params: ["uploadSessionId"],
+      response: schemas.uploadCancel,
+    },
+    {
+      method: "get",
+      path: "/api/v1/search",
+      summary: "Search authorized resource metadata",
+      tag: "Search",
+      query: SearchQuerySchema,
+      response: schemas.search,
+    },
+    {
+      method: "get",
+      path: "/api/v1/jobs",
+      summary: "List owner-scoped background jobs",
+      tag: "Jobs",
+      query: JobListQuerySchema,
+      response: schemas.jobs,
+    },
+    {
+      method: "get",
+      path: "/api/v1/jobs/{jobId}",
+      summary: "Get a sanitized background job",
+      tag: "Jobs",
+      params: ["jobId"],
+      response: schemas.job,
+    },
+    {
+      method: "post",
+      path: "/api/v1/shares",
+      summary: "Create a direct existing-user share",
+      tag: "Sharing",
+      body: ShareCreateRequestSchema,
+      response: schemas.share,
+      status: 201,
+    },
+    {
+      method: "get",
+      path: "/api/v1/resources/{resourceType}/{resourceId}/shares",
+      summary: "List direct shares for a resource",
+      tag: "Sharing",
+      params: ["resourceType", "resourceId"],
+      response: schemas.shares,
+    },
+    {
+      method: "delete",
+      path: "/api/v1/shares/{shareId}",
+      summary: "Revoke a direct share",
+      tag: "Sharing",
+      params: ["shareId"],
+      response: schemas.share,
+    },
+    {
+      method: "post",
+      path: "/api/v1/share-links",
+      summary: "Create a one-time-disclosure public link",
+      tag: "Sharing",
+      body: ShareLinkCreateRequestSchema,
+      response: schemas.shareLinkCreate,
+      status: 201,
+    },
+    {
+      method: "get",
+      path: "/api/v1/share-links/{shareLinkId}",
+      summary: "Get public-link metadata without its token",
+      tag: "Sharing",
+      params: ["shareLinkId"],
+      response: schemas.shareLink,
+    },
+    {
+      method: "delete",
+      path: "/api/v1/share-links/{shareLinkId}",
+      summary: "Revoke a public link",
+      tag: "Sharing",
+      params: ["shareLinkId"],
+      response: schemas.shareLink,
+    },
+    {
+      method: "get",
+      path: "/api/v1/public/{token}",
+      summary: "Access one public view-only resource",
+      tag: "Public",
+      params: ["token"],
+      query: PublicShareQuerySchema,
+      response: schemas.publicShare,
+      public: true,
+    },
+    {
+      method: "get",
+      path: "/api/v1/trash",
+      summary: "List owner-scoped soft-deleted resources",
+      tag: "Trash",
+      query: CursorPaginationQuerySchema,
+      response: schemas.trash,
+    },
+    {
+      method: "get",
+      path: "/api/v1/audit-logs",
+      summary: "List the authenticated user's audit events",
+      tag: "Audit",
+      query: CursorPaginationQuerySchema,
+      response: schemas.auditLogs,
+    },
+  ];
+
+  for (const route of routes) registerRoute(registry, errorSchema, route);
+
+  return new OpenApiGeneratorV3(registry.definitions).generateDocument({
+    openapi: "3.0.3",
+    info: {
+      title: "Nimbus API",
+      version: "1.0.0",
+      description:
+        "Metadata, upload coordination, authorization, sharing, search, jobs, and trash APIs. File bytes transfer directly between browsers and S3-compatible storage using short-lived signed URLs.",
+    },
+    servers: [{ url: publicApiUrl }],
+    tags: [
+      { name: "Operations" },
+      { name: "Authentication" },
+      { name: "Folders" },
+      { name: "Files" },
+      { name: "Versions" },
+      { name: "Uploads" },
+      { name: "Search" },
+      { name: "Jobs" },
+      { name: "Sharing" },
+      { name: "Public" },
+      { name: "Trash" },
+      { name: "Audit" },
+    ],
+  });
+}
+
+function registerRoute(registry: OpenAPIRegistry, errorSchema: ZodTypeAny, route: RouteDefinition) {
+  const status = route.status ?? 200;
+  registry.registerPath({
+    method: route.method,
+    path: route.path,
+    summary: route.summary,
+    tags: [route.tag],
+    security: route.public ? [] : [{ bearerAuth: [] }],
+    request: {
+      ...(route.params ? { params: pathParameters(route.params) } : {}),
+      ...(route.query ? { query: route.query } : {}),
+      ...(route.body ? { body: { content: { "application/json": { schema: route.body } } } } : {}),
+    },
+    responses: {
+      [status]: {
+        description: status === 201 ? "Created" : "Success",
+        content: { "application/json": { schema: route.response } },
+      },
+      400: errorResponse("Invalid request", errorSchema),
+      401: errorResponse("Authentication required or token invalid", errorSchema),
+      403: errorResponse("Permission denied", errorSchema),
+      404: errorResponse("Resource not found", errorSchema),
+      409: errorResponse("Resource state conflict", errorSchema),
+      429: errorResponse("Rate limit exceeded", errorSchema),
+      500: errorResponse("Internal error", errorSchema),
+    },
+  });
+}
+
+function pathParameters(names: string[]) {
+  return z.object(
+    Object.fromEntries(
+      names.map((name) => [
+        name,
+        z
+          .string()
+          .min(1)
+          .openapi({ param: { name, in: "path" } }),
+      ]),
+    ),
+  );
+}
+
+function errorResponse(description: string, schema: ZodTypeAny) {
+  return { description, content: { "application/json": { schema } } };
+}

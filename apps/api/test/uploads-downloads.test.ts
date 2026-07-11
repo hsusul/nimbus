@@ -1,4 +1,4 @@
-import type { ApiConfig } from "@nimbus/config";
+import { getApiConfig, type ApiConfig } from "@nimbus/config";
 import { getPrismaClient } from "@nimbus/db";
 import { createLogger } from "@nimbus/logger";
 import type {
@@ -127,6 +127,7 @@ class FakeUploadFinalizationQueue implements UploadFinalizationQueue {
 }
 
 const testConfig: ApiConfig = {
+  ...getApiConfig({ NODE_ENV: "test", DEPLOYMENT_PROFILE: "test" }),
   nodeEnv: "test",
   logLevel: "error",
   host: "127.0.0.1",
@@ -149,6 +150,7 @@ const testConfig: ApiConfig = {
     secretKey: "nimbus-secret",
     bucket: "nimbus-test",
     region: "us-east-1",
+    forcePathStyle: true,
     signedUploadUrlTtlSeconds: 900,
     signedDownloadUrlTtlSeconds: 300,
   },

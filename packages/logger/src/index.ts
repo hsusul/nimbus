@@ -17,6 +17,7 @@ export interface Logger {
 
 export interface LoggerOptions {
   service: string;
+  environment?: string;
   level?: LogLevel;
   sink?: (line: string) => void;
 }
@@ -41,6 +42,7 @@ export function createLogger(options: LoggerOptions): Logger {
       timestamp: new Date().toISOString(),
       level: logLevel,
       service: options.service,
+      ...(options.environment ? { environment: options.environment } : {}),
       message,
       ...fields,
     });

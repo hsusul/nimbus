@@ -294,6 +294,7 @@ export function FileDetailDrawer({
                           ref={versionInput}
                           className="sr-only"
                           type="file"
+                          aria-label="Choose a replacement file"
                           onChange={(event) => {
                             const selected = event.target.files?.[0];
                             if (selected) enqueue([selected], file.folderId, file.id);

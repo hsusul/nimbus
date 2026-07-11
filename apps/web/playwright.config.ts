@@ -12,8 +12,20 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
-    ...devices["Desktop Chrome"],
   },
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "firefox",
+      testIgnore: [/console\.spec\.ts/, /accessibility\.spec\.ts/],
+      use: { ...devices["Desktop Firefox"] },
+    },
+    {
+      name: "webkit",
+      testIgnore: [/console\.spec\.ts/, /accessibility\.spec\.ts/],
+      use: { ...devices["Desktop Safari"] },
+    },
+  ],
   webServer: {
     command:
       "WEB_PORT=3100 CORS_ORIGIN=http://localhost:3100 WEB_DEV_AUTH_USER=e2e-owner WEB_DEV_AUTH_EMAIL=e2e-owner@nimbus.local WEB_DEV_AUTH_NAME='E2E Owner' pnpm --dir ../.. --parallel --filter @nimbus/api --filter @nimbus/worker --filter @nimbus/web dev",

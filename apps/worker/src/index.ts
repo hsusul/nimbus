@@ -24,6 +24,7 @@ import { createQueue } from "./queues";
 const config = getWorkerConfig();
 const logger = createLogger({
   service: "nimbus-worker",
+  environment: config.deploymentProfile,
   level: config.logLevel,
 });
 const connection = createRedisConnection(config.redisUrl);
@@ -32,6 +33,7 @@ const storageProvider = new S3CompatibleStorageProvider({
   region: config.storage.region,
   accessKey: config.storage.accessKey,
   secretKey: config.storage.secretKey,
+  forcePathStyle: config.storage.forcePathStyle,
 });
 const postUploadQueues = {
   metadata: createQueue<MetadataIndexingJobPayload>(METADATA_INDEXING_QUEUE_NAME, config.redisUrl),
@@ -59,7 +61,7 @@ const uploadFinalizationWorker = new Worker(
   },
   {
     connection: createBullMqConnectionOptions(config.redisUrl),
-    concurrency: 2,
+    concurrency: config.concurrency.uploadFinalization,
   },
 );
 const metadataIndexingWorker = new Worker(
@@ -149,16 +151,34 @@ main().catch((error: unknown) => {
   process.exitCode = 1;
 });
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.once("SIGINT", () => void shutdown("SIGINT"));
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
-async function shutdown() {
+let shutdownPromise: Promise<void> | null = null;
+
+function shutdown(signal: string) {
+  shutdownPromise ??= runShutdown(signal);
+  return shutdownPromise;
+}
+
+async function runShutdown(signal: string) {
   clearInterval(cleanupSchedule);
-  logger.info("worker_stopping");
-  await uploadFinalizationWorker.close();
-  await metadataIndexingWorker.close();
-  await thumbnailGenerationWorker.close();
-  await objectCleanupWorker.close();
-  connection.disconnect();
-  process.exit(0);
+  logger.info("worker_stopping", { signal, policy: "finish_active_jobs" });
+  try {
+    await Promise.all([
+      uploadFinalizationWorker.close(),
+      metadataIndexingWorker.close(),
+      thumbnailGenerationWorker.close(),
+      objectCleanupWorker.close(),
+    ]);
+    await Promise.all(Object.values(postUploadQueues).map((queue) => queue.close()));
+    await connection.quit();
+    logger.info("worker_stopped");
+  } catch (error) {
+    logger.error("worker_shutdown_failed", {
+      failure_code: "shutdown_failed",
+      error_category: error instanceof Error ? error.name : "unknown_error",
+    });
+    process.exitCode = 1;
+  }
 }

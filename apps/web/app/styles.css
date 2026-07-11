@@ -8,7 +8,7 @@
   --sidebar-hover: #f8f9fc;
   --text: #1d2433;
   --text-muted: #595f6a;
-  --text-faint: #667085;
+  --text-faint: #626b7a;
   --border: #e1e6ef;
   --border-strong: #d2d8e0;
   --accent: #0061ff;
@@ -353,6 +353,41 @@ h3 {
   display: grid;
   place-items: center;
   padding: 24px;
+}
+.auth-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--canvas);
+}
+.auth-panel {
+  width: min(420px, 100%);
+  padding: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+.auth-panel__mark {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 12px;
+}
+.auth-panel__brand {
+  margin: 0 0 28px;
+  color: var(--text);
+  font-weight: 800;
+}
+.auth-panel h1 {
+  margin: 0;
+  font-size: 24px;
+}
+.auth-panel > p:not(.auth-panel__brand) {
+  margin: 10px 0 24px;
+  color: var(--text-muted);
+  font-size: 14px;
 }
 
 .page {

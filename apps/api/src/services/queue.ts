@@ -6,6 +6,7 @@ import { Queue, type ConnectionOptions } from "bullmq";
 
 export interface UploadFinalizationQueue {
   enqueueUploadFinalization(input: UploadFinalizationJobPayload): Promise<{ bullmqJobId: string }>;
+  close?(): Promise<void>;
 }
 
 export class BullMqUploadFinalizationQueue implements UploadFinalizationQueue {
@@ -33,6 +34,10 @@ export class BullMqUploadFinalizationQueue implements UploadFinalizationQueue {
     return {
       bullmqJobId: job.id ?? input.backgroundJobId,
     };
+  }
+
+  async close() {
+    await this.queue.close();
   }
 }
 

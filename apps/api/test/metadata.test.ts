@@ -1,4 +1,4 @@
-import type { ApiConfig } from "@nimbus/config";
+import { getApiConfig, type ApiConfig } from "@nimbus/config";
 import { getPrismaClient } from "@nimbus/db";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 
 const testConfig: ApiConfig = {
+  ...getApiConfig({ NODE_ENV: "test", DEPLOYMENT_PROFILE: "test" }),
   nodeEnv: "test",
   logLevel: "error",
   host: "127.0.0.1",
@@ -28,6 +29,7 @@ const testConfig: ApiConfig = {
     secretKey: "nimbus-secret",
     bucket: "nimbus-local",
     region: "us-east-1",
+    forcePathStyle: true,
     signedUploadUrlTtlSeconds: 900,
     signedDownloadUrlTtlSeconds: 300,
   },

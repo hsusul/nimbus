@@ -6,15 +6,24 @@ import { S3CompatibleStorageProvider, type ObjectStorageProvider } from "@nimbus
 import cors from "cors";
 import express from "express";
 
-import { devAuthMiddleware } from "./middleware/auth";
+import { authenticationMiddleware } from "./middleware/auth";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler";
+import {
+  MemoryRateLimitStore,
+  rateLimitMiddleware,
+  RedisRateLimitStore,
+  type RateLimitStore,
+} from "./middleware/rate-limit";
 import { requestIdMiddleware } from "./middleware/request-id";
+import { requestLoggingMiddleware } from "./middleware/request-logging";
+import { securityHeadersMiddleware, trustedOriginMiddleware } from "./middleware/security";
 import { auditLogsRouter } from "./routes/audit-logs";
 import { filesRouter } from "./routes/files";
 import { foldersRouter } from "./routes/folders";
 import { healthRouter } from "./routes/health";
 import { jobsRouter } from "./routes/jobs";
 import { meRouter } from "./routes/me";
+import { openApiRouter } from "./routes/openapi";
 import { readyRouter } from "./routes/ready";
 import { publicRouter } from "./routes/public";
 import { shareLinksRouter } from "./routes/share-links";
@@ -65,6 +74,7 @@ export interface AppDependencies {
   thumbnailService?: ThumbnailService;
   m8JobScheduler?: M8JobScheduler;
   trashService?: TrashService;
+  rateLimitStore?: RateLimitStore;
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
@@ -73,14 +83,16 @@ export function createApp(dependencies: AppDependencies = {}) {
     dependencies.logger ??
     createLogger({
       service: "nimbus-api",
+      environment: config.deploymentProfile,
       level: config.logLevel,
     });
   const readinessChecker = dependencies.readinessChecker ?? createReadinessChecker(config.redisUrl);
   const userService = dependencies.userService ?? new PrismaUserService();
   const permissionService = dependencies.permissionService ?? new PrismaPermissionService();
-  const m8JobScheduler =
-    dependencies.m8JobScheduler ??
-    new PrismaM8JobScheduler(new BullMqM8QueueAdapter(config.redisUrl));
+  const m8QueueAdapter = dependencies.m8JobScheduler
+    ? null
+    : new BullMqM8QueueAdapter(config.redisUrl);
+  const m8JobScheduler = dependencies.m8JobScheduler ?? new PrismaM8JobScheduler(m8QueueAdapter!);
   const folderService =
     dependencies.folderService ??
     new PrismaFolderService(undefined, config.maxFolderDepth, m8JobScheduler);
@@ -94,6 +106,7 @@ export function createApp(dependencies: AppDependencies = {}) {
       region: config.storage.region,
       accessKey: config.storage.accessKey,
       secretKey: config.storage.secretKey,
+      forcePathStyle: config.storage.forcePathStyle,
     });
   const uploadFinalizationQueue =
     dependencies.uploadFinalizationQueue ?? new BullMqUploadFinalizationQueue(config.redisUrl);
@@ -137,27 +150,42 @@ export function createApp(dependencies: AppDependencies = {}) {
       config.signedDownloadUrlTtlSeconds,
     );
   const trashService = dependencies.trashService ?? new PrismaTrashService();
+  const rateLimitStore: RateLimitStore =
+    dependencies.rateLimitStore ??
+    (config.deploymentProfile === "test"
+      ? new MemoryRateLimitStore()
+      : new RedisRateLimitStore(config.redisUrl));
   const app = express();
 
   app.disable("x-powered-by");
+  if (config.trustProxy) app.set("trust proxy", 1);
+  app.use(securityHeadersMiddleware(config));
+  app.use(requestIdMiddleware);
+  app.use(requestLoggingMiddleware(logger, config));
   app.use(
     cors({
-      origin: config.corsOrigin,
+      origin: config.allowedWebOrigins,
+      methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: [
+        "authorization",
+        "content-type",
+        "x-correlation-id",
+        "x-request-id",
+        ...(config.deploymentProfile === "production"
+          ? []
+          : ["x-nimbus-dev-user", "x-nimbus-dev-email", "x-nimbus-dev-name"]),
+      ],
+      exposedHeaders: ["retry-after", "x-request-id", "x-ratelimit-limit", "x-ratelimit-remaining"],
+      maxAge: 600,
     }),
   );
   app.use(express.json());
-  app.use(requestIdMiddleware);
-  app.use((req, _res, next) => {
-    logger.info("request_started", {
-      request_id: req.context.requestId,
-      method: req.method,
-      path: redactPublicTokenPath(req.path),
-    });
-    next();
-  });
-  app.use(devAuthMiddleware(config));
+  app.use(trustedOriginMiddleware(config));
+  app.use(authenticationMiddleware(config));
+  app.use(rateLimitMiddleware(config, rateLimitStore));
   app.use(healthRouter());
   app.use(readyRouter(readinessChecker));
+  app.use(openApiRouter(config.publicApiUrl));
   app.use(meRouter(userService));
   app.use(foldersRouter(folderService, userService));
   app.use(uploadsRouter(uploadService, userService));
@@ -170,11 +198,20 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use(publicRouter(shareLinkService));
   app.use(auditLogsRouter(auditLogService, userService));
   app.use(notFoundHandler);
-  app.use(errorHandler);
+  app.use(errorHandler(logger));
+
+  app.locals.nimbusShutdown = async () => {
+    await Promise.all([
+      rateLimitStore.close?.(),
+      uploadFinalizationQueue.close?.(),
+      m8QueueAdapter?.close?.(),
+    ]);
+  };
 
   return app;
 }
 
-function redactPublicTokenPath(path: string): string {
-  return path.replace(/^(\/api\/v1\/public\/)[^/]+/, "$1[REDACTED]");
+export async function shutdownApp(app: ReturnType<typeof createApp>) {
+  const shutdown = app.locals.nimbusShutdown as (() => Promise<void>) | undefined;
+  await shutdown?.();
 }

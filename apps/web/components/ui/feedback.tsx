@@ -52,7 +52,7 @@ export function EmptyState({
 
 export function TableSkeleton({ rows = 6 }: { rows?: number }) {
   return (
-    <div className="skeleton-list" aria-label="Loading resources" aria-busy="true">
+    <div className="skeleton-list" role="status" aria-label="Loading resources" aria-busy="true">
       {Array.from({ length: rows }, (_, index) => (
         <div className="skeleton-row" key={index}>
           <span className="skeleton skeleton--icon" />

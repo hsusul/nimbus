@@ -27,7 +27,7 @@ import {
   type ShareCreateRequest,
   type UploadStartRequest,
 } from "@nimbus/contracts";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 
 import { toApiError } from "./api-errors";
 import { buildQueryString } from "./query-string";
@@ -41,10 +41,24 @@ export interface DevAuthIdentity {
 export interface ApiClientConfig {
   apiBaseUrl: string;
   devAuth: DevAuthIdentity | null;
+  accessToken?: string | null;
+  accessTokenEndpoint?: string | null;
+  productionAuth?: boolean;
 }
 
+const AccessTokenResponseSchema = z.object({
+  data: z.object({
+    accessToken: z.string().min(1),
+    expiresAt: z.string().datetime(),
+  }),
+});
+
 export class NimbusApiClient {
-  constructor(private readonly config: ApiClientConfig) {}
+  private accessToken: string | null;
+
+  constructor(private readonly config: ApiClientConfig) {
+    this.accessToken = config.accessToken ?? null;
+  }
 
   get me() {
     return this.request("/api/v1/me", MeResponseSchema);
@@ -264,7 +278,29 @@ export class NimbusApiClient {
       authenticated?: boolean;
     } = {},
   ): Promise<T> {
-    const response = await fetch(`${this.config.apiBaseUrl}${path}`, {
+    let response = await this.fetchApi(path, options);
+    if (
+      response.status === 401 &&
+      options.authenticated !== false &&
+      this.config.accessTokenEndpoint
+    ) {
+      await this.refreshAccessToken();
+      response = await this.fetchApi(path, options);
+    }
+    if (!response.ok) throw await toApiError(response);
+    return schema.parse(await response.json());
+  }
+
+  private fetchApi(
+    path: string,
+    options: {
+      method?: string;
+      body?: unknown;
+      signal?: AbortSignal;
+      authenticated?: boolean;
+    },
+  ) {
+    return fetch(`${this.config.apiBaseUrl}${path}`, {
       method: options.method ?? "GET",
       headers: {
         ...(options.body === undefined ? {} : { "content-type": "application/json" }),
@@ -274,11 +310,21 @@ export class NimbusApiClient {
       signal: options.signal,
       cache: "no-store",
     });
+  }
+
+  private async refreshAccessToken() {
+    const response = await fetch(this.config.accessTokenEndpoint!, {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { accept: "application/json" },
+    });
     if (!response.ok) throw await toApiError(response);
-    return schema.parse(await response.json());
+    this.accessToken = AccessTokenResponseSchema.parse(await response.json()).data.accessToken;
   }
 
   private authHeaders(): Record<string, string> {
+    if (this.accessToken) return { authorization: `Bearer ${this.accessToken}` };
     if (!this.config.devAuth) return {};
     return {
       "x-nimbus-dev-user": this.config.devAuth.user,

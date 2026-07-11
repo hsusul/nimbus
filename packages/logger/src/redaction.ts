@@ -13,10 +13,15 @@ const SENSITIVE_QUERY_PARAMS = new Set([
 ]);
 
 export type Redactable =
-  null | string | number | boolean | Redactable[] | { [key: string]: Redactable };
+  null | undefined | string | number | boolean | Redactable[] | { [key: string]: Redactable };
 
 export function redact(input: Redactable): Redactable {
-  if (input === null || typeof input === "number" || typeof input === "boolean") {
+  if (
+    input === null ||
+    input === undefined ||
+    typeof input === "number" ||
+    typeof input === "boolean"
+  ) {
     return input;
   }
 

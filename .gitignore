@@ -64,8 +64,12 @@ Thumbs.db
 packages/db/src/generated/
 **/.prisma/
 
-# Private planning/docs
+# Private planning/docs. Launch screenshots are public README assets.
 docs/
+!docs/
+docs/*
+!docs/assets/
+!docs/assets/**
 notes/
 scratch/
 *.local.md

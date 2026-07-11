@@ -1,4 +1,4 @@
-import type { ApiConfig } from "@nimbus/config";
+import { getApiConfig, type ApiConfig } from "@nimbus/config";
 import { SearchResponseSchema } from "@nimbus/contracts";
 import { buildFileSearchDocument, buildFolderSearchDocument, getPrismaClient } from "@nimbus/db";
 import { createHash, randomUUID } from "node:crypto";
@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 
 const testConfig: ApiConfig = {
+  ...getApiConfig({ NODE_ENV: "test", DEPLOYMENT_PROFILE: "test" }),
   nodeEnv: "test",
   logLevel: "error",
   host: "127.0.0.1",
@@ -30,6 +31,7 @@ const testConfig: ApiConfig = {
     secretKey: "nimbus-secret",
     bucket: "nimbus-test",
     region: "us-east-1",
+    forcePathStyle: true,
     signedUploadUrlTtlSeconds: 900,
     signedDownloadUrlTtlSeconds: 300,
   },

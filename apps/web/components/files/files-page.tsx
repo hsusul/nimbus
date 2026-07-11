@@ -242,6 +242,7 @@ export function FilesPage() {
               ref={filePicker}
               type="file"
               multiple
+              aria-label="Choose files to upload"
               className="sr-only"
               onChange={(event) => {
                 addFiles([...(event.target.files ?? [])]);
@@ -273,6 +274,7 @@ export function FilesPage() {
                 <input
                   className="sr-only"
                   type="file"
+                  aria-label={`Choose ${record.fileName} to resume upload`}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     if (file)
