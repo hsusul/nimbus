@@ -10,7 +10,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run test",
     "test:watch": "vitest test",
-    "test:e2e": "docker compose -f ../../docker-compose.yml run --rm minio-init && pnpm --dir ../.. demo:seed && playwright test"
+    "test:e2e": "docker compose -f ../../docker-compose.yml run --rm minio-init && pnpm --dir ../.. demo:seed && playwright test",
+    "test:e2e:production": "playwright test --config=playwright.production.config.ts"
   },
   "dependencies": {
     "@nimbus/auth": "workspace:*",

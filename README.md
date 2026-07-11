@@ -2,7 +2,7 @@
 
 Nimbus is a production-configurable cloud file workspace built to demonstrate storage-system engineering end to end. It combines direct-to-object-storage uploads, immutable versions, deny-by-default sharing, authorization-safe search, durable workers, and a responsive web console.
 
-**Status:** M10 Production Readiness and Public Launch is complete locally. The supported deployment path is Vercel for the web tier, Render for the API and worker, managed PostgreSQL and Redis, and Cloudflare R2 or another S3-compatible private bucket.
+**Status:** M10 is complete locally. M10.5 repository preparation is complete, but production deployment is blocked because no platform credentials, domains, or managed-service access were available. There is no verified live demo or production API URL. The supported deployment path is Vercel for the web tier, Render for the API and worker, managed PostgreSQL and Redis, and Cloudflare R2 or another S3-compatible private bucket.
 
 ## Product Overview
 
@@ -142,6 +142,8 @@ The cross-browser smoke covers authentication, folders, upload, file details, de
 6. Verify `/health`, `/ready`, sign-in, upload, download, worker completion, and revocation before directing traffic.
 
 The repository does not contain automatic production publishing. Deployment requires explicitly configured protected platform credentials.
+
+After deployment, run the non-destructive checks documented in [Production Validation](docs/PRODUCTION_VALIDATION.md). The README intentionally omits demo/API links until they are reachable and verified.
 
 ## API Documentation
 

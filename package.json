@@ -29,6 +29,8 @@
     "smoke:minio:thumbnail": "tsx scripts/minio-thumbnail-smoke.ts",
     "smoke:minio:cleanup": "tsx scripts/minio-cleanup-smoke.ts",
     "smoke:metadata:indexing": "tsx scripts/metadata-indexing-smoke.ts",
+    "smoke:production": "tsx scripts/production-smoke.ts",
+    "test:e2e:production": "pnpm --filter @nimbus/web test:e2e:production",
     "perf:search:explain": "tsx scripts/search-explain.ts"
   },
   "devDependencies": {
