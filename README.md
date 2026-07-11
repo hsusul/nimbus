@@ -2,7 +2,7 @@
 
 Nimbus is a production-configurable cloud file workspace built to demonstrate storage-system engineering end to end. It combines direct-to-object-storage uploads, immutable versions, deny-by-default sharing, authorization-safe search, durable workers, and a responsive web console.
 
-**Status:** M10 is complete locally. M10.5 repository preparation is complete, but production deployment is blocked because no platform credentials, domains, or managed-service access were available. There is no verified live demo or production API URL. The supported deployment path is Vercel for the web tier, Render for the API and worker, managed PostgreSQL and Redis, and Cloudflare R2 or another S3-compatible private bucket.
+**Status:** Managed web/API/data/storage integration is validated at [Nimbus Web](https://nimbus-web-psi.vercel.app) and [Nimbus API](https://nimbus-api-q8bc.onrender.com). GitHub OAuth, eight migrations, managed PostgreSQL/Redis readiness, private R2 CORS, direct browser upload, and worker-driven finalization from a local worker have passed. The permanent Render worker and remaining operational gates are still pending; this is not yet a fully validated production launch.
 
 ## Product Overview
 
@@ -143,7 +143,7 @@ The cross-browser smoke covers authentication, folders, upload, file details, de
 
 The repository does not contain automatic production publishing. Deployment requires explicitly configured protected platform credentials.
 
-After deployment, run the non-destructive checks documented in [Production Validation](docs/PRODUCTION_VALIDATION.md). The README intentionally omits demo/API links until they are reachable and verified.
+The live OpenAPI 3.0.3 document is available at [Nimbus OpenAPI](https://nimbus-api-q8bc.onrender.com/api/v1/openapi.json). The permanent worker definition is repository-ready but was not deployed during M10.6 preparation. See [Production Validation](docs/PRODUCTION_VALIDATION.md) for passed and blocked gates.
 
 ## API Documentation
 
@@ -151,7 +151,8 @@ Run the API and import `http://localhost:4000/api/v1/openapi.json` into an OpenA
 
 ## Current Limitations
 
-- Live Cloudflare R2/AWS S3 validation requires external credentials and was not performed; compatibility is validated against MinIO and standard S3 APIs.
+- The worker is not yet permanently hosted; asynchronous features stop when the validated local production-connected worker stops.
+- Full production browser/accessibility, monitoring, backup restore, rollback, secret rotation, hosted-worker restart behavior, and production screenshots remain incomplete.
 - GitHub is the only configured production Auth.js provider.
 - Search covers metadata, not file contents, OCR, typo tolerance, or semantic search.
 - Public links are view-only and cannot be password protected.
