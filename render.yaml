@@ -7,9 +7,6 @@ services:
     dockerContext: .
     autoDeployTrigger: checksPass
     healthCheckPath: /ready
-    preDeployCommand: >-
-      node node_modules/prisma/build/index.js migrate deploy
-      --schema=node_modules/@nimbus/db/prisma/schema.prisma
     envVars:
       - key: NODE_ENV
         value: production
