@@ -1,0 +1,25 @@
+{
+  "name": "@nimbus/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "nimbus": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup --config tsup.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@nimbus/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.14",
+    "tsup": "8.5.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

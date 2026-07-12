@@ -3,23 +3,41 @@ import type { ApiConfig } from "@nimbus/config";
 import type { NextFunction, Request, Response } from "express";
 
 import { HttpError } from "./error-handler";
+import type { ApiKeyService } from "../services/api-keys";
 
 type AuthenticationConfig = Pick<
   ApiConfig,
   "authMode" | "devAuthEnabled" | "deploymentProfile" | "apiAuth"
 >;
 
-export function authenticationMiddleware(config: AuthenticationConfig) {
+export function authenticationMiddleware(
+  config: AuthenticationConfig,
+  apiKeyService: ApiKeyService,
+) {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
+      const token = readBearerToken(req.header("authorization"));
+      if (token?.startsWith("nmb_live_")) {
+        const authenticated = await apiKeyService.authenticate(token);
+        if (!authenticated) throw new Error("Invalid API key.");
+        req.context.authenticatedUser = authenticated.user;
+        req.context.authentication = {
+          type: "api_key",
+          apiKeyId: authenticated.apiKeyId,
+          scopes: authenticated.scopes,
+        };
+        next();
+        return;
+      }
+
       if (config.authMode === "authjs") {
-        const token = readBearerToken(req.header("authorization"));
         if (token) {
           req.context.authenticatedUser = await verifyApiAccessToken(token, {
             secret: config.apiAuth.secret,
             issuer: config.apiAuth.issuer,
             audience: config.apiAuth.audience,
           });
+          req.context.authentication = { type: "browser_token" };
         }
         next();
         return;
@@ -33,7 +51,10 @@ export function authenticationMiddleware(config: AuthenticationConfig) {
       const user = resolveDevUser(req.headers, {
         enabled: config.devAuthEnabled,
       });
-      if (user) req.context.authenticatedUser = user;
+      if (user) {
+        req.context.authenticatedUser = user;
+        req.context.authentication = { type: "development" };
+      }
       next();
     } catch {
       next(new HttpError(401, "invalid_access_token", "The access token is invalid or expired."));

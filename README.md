@@ -37,6 +37,29 @@ All screenshots are generated from deterministic synthetic demo data with `pnpm 
 - Authorization-safe PostgreSQL metadata search across owned and directly shared files.
 - Private image thumbnails, owner-scoped job status, and idempotent BullMQ workers.
 - Typed Zod contracts, generated OpenAPI 3.0.3, structured errors, and request correlation IDs.
+- Hash-only scoped personal API keys, a TypeScript SDK, and a scriptable `nimbus` CLI.
+
+## Developer Quick Start
+
+Create a key through `POST /api/v1/api-keys`; copy the `nmb_live_...` value immediately because Nimbus returns it only once.
+
+```ts
+import { NimbusClient } from "@nimbus/sdk";
+const nimbus = new NimbusClient({
+  baseUrl: "https://api.example.com",
+  apiKey: "nmb_live_REPLACE_ME",
+});
+const files = await nimbus.listFiles();
+```
+
+```bash
+pnpm --filter @nimbus/cli build
+nimbus login --url https://api.example.com
+nimbus whoami
+nimbus upload ./report.pdf --folder FOLDER_ID
+```
+
+The CLI prompts for the key and stores it in `~/.config/nimbus/config.json` with mode `0600` on Unix. This is plaintext local storage protected by filesystem permissions, not an OS keychain; use `NIMBUS_API_KEY` and `NIMBUS_API_URL` in managed environments.
 
 ## Architecture
 

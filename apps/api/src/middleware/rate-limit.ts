@@ -76,7 +76,9 @@ export function rateLimitMiddleware(config: Pick<ApiConfig, "rateLimit">, store:
         return;
       }
       const identity =
-        req.context.authenticatedUser?.authSubject ??
+        (req.context.authentication?.type === "api_key"
+          ? req.context.authentication.apiKeyId
+          : req.context.authenticatedUser?.authSubject) ??
         req.ip ??
         req.socket.remoteAddress ??
         "unknown";

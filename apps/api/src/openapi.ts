@@ -1,5 +1,9 @@
 import {
   AuditLogListResponseSchema,
+  ApiKeyCreateRequestSchema,
+  ApiKeyCreateResponseSchema,
+  ApiKeyListResponseSchema,
+  ApiKeyResponseSchema,
   CursorPaginationQuerySchema,
   ErrorEnvelopeSchema,
   FileCreateRequestSchema,
@@ -69,8 +73,8 @@ export function createOpenApiDocument(publicApiUrl: string) {
   registry.registerComponent("securitySchemes", "bearerAuth", {
     type: "http",
     scheme: "bearer",
-    bearerFormat: "JWT",
-    description: "Short-lived Nimbus API token minted by the authenticated web tier.",
+    bearerFormat: "JWT or nmb_live_ API key",
+    description: "Short-lived browser token or scoped personal Nimbus API key.",
   });
   const errorSchema = registry.register("ErrorEnvelope", ErrorEnvelopeSchema);
   const schemas = {
@@ -107,6 +111,9 @@ export function createOpenApiDocument(publicApiUrl: string) {
     publicShare: registry.register("PublicShareResponse", PublicShareResponseSchema),
     trash: registry.register("TrashListResponse", TrashListResponseSchema),
     auditLogs: registry.register("AuditLogListResponse", AuditLogListResponseSchema),
+    apiKeyCreate: registry.register("ApiKeyCreateResponse", ApiKeyCreateResponseSchema),
+    apiKey: registry.register("ApiKeyResponse", ApiKeyResponseSchema),
+    apiKeys: registry.register("ApiKeyListResponse", ApiKeyListResponseSchema),
   };
 
   const routes: RouteDefinition[] = [
@@ -132,6 +139,38 @@ export function createOpenApiDocument(publicApiUrl: string) {
       summary: "Get the active internal user",
       tag: "Authentication",
       response: schemas.me,
+    },
+    {
+      method: "post",
+      path: "/api/v1/api-keys",
+      summary: "Create a personal API key",
+      tag: "API Keys",
+      body: ApiKeyCreateRequestSchema,
+      response: schemas.apiKeyCreate,
+      status: 201,
+    },
+    {
+      method: "get",
+      path: "/api/v1/api-keys",
+      summary: "List personal API keys",
+      tag: "API Keys",
+      response: schemas.apiKeys,
+    },
+    {
+      method: "get",
+      path: "/api/v1/api-keys/{apiKeyId}",
+      summary: "Get API key metadata",
+      tag: "API Keys",
+      params: ["apiKeyId"],
+      response: schemas.apiKey,
+    },
+    {
+      method: "delete",
+      path: "/api/v1/api-keys/{apiKeyId}",
+      summary: "Revoke an API key",
+      tag: "API Keys",
+      params: ["apiKeyId"],
+      response: schemas.apiKey,
     },
     {
       method: "post",

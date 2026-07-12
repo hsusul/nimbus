@@ -7,6 +7,7 @@ import cors from "cors";
 import express from "express";
 
 import { authenticationMiddleware } from "./middleware/auth";
+import { apiKeyScopeMiddleware } from "./middleware/api-key-scopes";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler";
 import {
   MemoryRateLimitStore,
@@ -18,6 +19,7 @@ import { requestIdMiddleware } from "./middleware/request-id";
 import { requestLoggingMiddleware } from "./middleware/request-logging";
 import { securityHeadersMiddleware, trustedOriginMiddleware } from "./middleware/security";
 import { auditLogsRouter } from "./routes/audit-logs";
+import { apiKeysRouter } from "./routes/api-keys";
 import { filesRouter } from "./routes/files";
 import { foldersRouter } from "./routes/folders";
 import { healthRouter } from "./routes/health";
@@ -32,6 +34,7 @@ import { searchRouter } from "./routes/search";
 import { uploadsRouter } from "./routes/uploads";
 import { trashRouter } from "./routes/trash";
 import { PrismaAuditLogService, type AuditLogService } from "./services/audit-log";
+import { PrismaApiKeyService, type ApiKeyService } from "./services/api-keys";
 import { PrismaDownloadService, type DownloadService } from "./services/downloads";
 import { PrismaFileService, type FileService } from "./services/files";
 import { PrismaFolderService, type FolderService } from "./services/folders";
@@ -75,6 +78,7 @@ export interface AppDependencies {
   m8JobScheduler?: M8JobScheduler;
   trashService?: TrashService;
   rateLimitStore?: RateLimitStore;
+  apiKeyService?: ApiKeyService;
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
@@ -88,6 +92,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     });
   const readinessChecker = dependencies.readinessChecker ?? createReadinessChecker(config.redisUrl);
   const userService = dependencies.userService ?? new PrismaUserService();
+  const apiKeyService = dependencies.apiKeyService ?? new PrismaApiKeyService();
   const permissionService = dependencies.permissionService ?? new PrismaPermissionService();
   const m8QueueAdapter = dependencies.m8JobScheduler
     ? null
@@ -181,12 +186,14 @@ export function createApp(dependencies: AppDependencies = {}) {
   );
   app.use(express.json());
   app.use(trustedOriginMiddleware(config));
-  app.use(authenticationMiddleware(config));
+  app.use(authenticationMiddleware(config, apiKeyService));
+  app.use(apiKeyScopeMiddleware);
   app.use(rateLimitMiddleware(config, rateLimitStore));
   app.use(healthRouter());
   app.use(readyRouter(readinessChecker));
   app.use(openApiRouter(config.publicApiUrl));
   app.use(meRouter(userService));
+  app.use(apiKeysRouter(apiKeyService, userService));
   app.use(foldersRouter(folderService, userService));
   app.use(uploadsRouter(uploadService, userService));
   app.use(filesRouter(fileService, userService, downloadService, versionService, thumbnailService));

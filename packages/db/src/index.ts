@@ -11,6 +11,7 @@ export type {
   UploadChunk,
   UploadSession,
   User,
+  ApiKey,
 } from "@prisma/client";
 export { checkDatabase } from "./health";
 export { createPrismaClient, disconnectPrismaClient, getPrismaClient } from "./client";

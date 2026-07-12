@@ -16,7 +16,7 @@ export interface AuditContext {
 
 export interface AppendAuditLogInput extends AuditContext {
   action: string;
-  resourceType: "folder" | "file" | "upload_session" | "file_version";
+  resourceType: "folder" | "file" | "upload_session" | "file_version" | "api_key";
   resourceId: string;
   targetUserId?: string | null;
   metadata?: Record<string, unknown>;

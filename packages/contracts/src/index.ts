@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export * from "./audit";
+export * from "./api-keys";
 export * from "./downloads";
 export * from "./files";
 export * from "./folders";
