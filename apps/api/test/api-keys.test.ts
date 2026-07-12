@@ -47,6 +47,13 @@ describe("personal API keys", () => {
       scopes: ["files:read"],
     });
     expect((await service.list(ownerId))[0]).not.toHaveProperty("key");
+    expect(JSON.stringify(await service.get(ownerId, created.id))).not.toContain(stored.keyHash);
+    await expect(service.get("another-user", created.id)).rejects.toMatchObject({
+      statusCode: 404,
+      code: "api_key_not_found",
+    });
+    expect(await service.authenticate(`${created.key}x`)).toBeNull();
+    expect(await service.authenticate(` ${created.key}`)).toBeNull();
   });
   it("revokes immediately and writes safe audits", async () => {
     const service = new PrismaApiKeyService();
@@ -99,5 +106,40 @@ describe("personal API keys", () => {
     await prisma.user.update({ where: { id: ownerId }, data: { status: "disabled" } });
     expect(await service.authenticate(disabled.key)).toBeNull();
     await prisma.user.update({ where: { id: ownerId }, data: { status: "active" } });
+  });
+  it("serializes concurrent creation so the active-key limit cannot be bypassed", async () => {
+    const concurrentOwner = await prisma.user.create({
+      data: {
+        authSubject: `dev:${suffix}:concurrent`,
+        email: `concurrent-${suffix}@example.test`,
+      },
+    });
+    try {
+      const service = new PrismaApiKeyService();
+      const owner = {
+        id: concurrentOwner.id,
+        email: concurrentOwner.email,
+        displayName: "Concurrent User",
+        status: "active",
+        storageQuotaBytes: 1n,
+        storageUsedBytes: 0n,
+        rootFolderId: "root",
+      };
+      const results = await Promise.allSettled(
+        Array.from({ length: 21 }, (_, index) =>
+          service.create(
+            owner,
+            { name: `Concurrent ${index}`, scopes: ["files:read"] },
+            { actorUserId: concurrentOwner.id, requestId: `req-${index}` },
+          ),
+        ),
+      );
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(20);
+      expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+      expect(await prisma.apiKey.count({ where: { ownerId: concurrentOwner.id } })).toBe(20);
+    } finally {
+      await prisma.auditLog.deleteMany({ where: { actorUserId: concurrentOwner.id } });
+      await prisma.user.delete({ where: { id: concurrentOwner.id } });
+    }
   });
 });

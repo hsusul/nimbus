@@ -34,6 +34,29 @@ const completedUpload = (id: string, fileId = "f") => ({
   },
 });
 describe("Nimbus SDK", () => {
+  it("rejects malformed keys, credentialed URLs, and invalid upload bounds", async () => {
+    expect(
+      () => new NimbusClient({ baseUrl: "https://api.example.test", apiKey: "nmb_live_bad" }),
+    ).toThrow("valid Nimbus API key");
+    expect(
+      () =>
+        new NimbusClient({
+          baseUrl: "https://user:pass@api.example.test",
+          apiKey: key,
+        }),
+    ).toThrow("without credentials");
+    expect(
+      () => new NimbusClient({ baseUrl: "https://api.example.test/base", apiKey: key }),
+    ).toThrow("without a path");
+    const client = new NimbusClient({ baseUrl: "https://api.example.test", apiKey: key });
+    const blob = new Blob(["a"]);
+    await expect(
+      client.uploadFile(
+        { name: "a", size: 1, slice: (start, end) => blob.slice(start, end) },
+        { folderId: "r", concurrency: 0 },
+      ),
+    ).rejects.toThrow("concurrency must be an integer between 1 and 16");
+  });
   it("sends API key auth and strictly parses identity", async () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
       response({
@@ -232,6 +255,56 @@ describe("Nimbus SDK", () => {
     expect(progress).toHaveBeenCalledWith(
       expect.objectContaining({ status: "completed", percent: 100 }),
     );
+  });
+
+  it("does not retry permanent storage failures", async () => {
+    let storageAttempts = 0;
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/uploads/start"))
+        return response({
+          data: {
+            uploadSessionId: "permanent",
+            fileId: "f",
+            uploadMode: "new_file",
+            uploadType: "multipart",
+            status: "uploading",
+            expiresAt: new Date().toISOString(),
+            multipart: {
+              chunkSizeBytes: "1",
+              partCount: 1,
+              signedParts: [
+                {
+                  partNumber: 1,
+                  sizeBytes: "1",
+                  url: "https://storage.test/permanent",
+                  method: "PUT",
+                  headers: {},
+                  expiresAt: new Date().toISOString(),
+                },
+              ],
+            },
+          },
+        });
+      if (url === "https://storage.test/permanent") {
+        storageAttempts += 1;
+        return new Response(null, { status: 403 });
+      }
+      throw new Error(url);
+    });
+    const client = new NimbusClient({
+      baseUrl: "https://api.example.test",
+      apiKey: key,
+      fetch: fetcher,
+    });
+    const blob = new Blob(["a"]);
+    await expect(
+      client.uploadFile(
+        { name: "a", size: 1, slice: (start, end) => blob.slice(start, end) },
+        { folderId: "r", retries: 3 },
+      ),
+    ).rejects.toMatchObject({ status: 403, code: "storage_upload_failed" });
+    expect(storageAttempts).toBe(1);
   });
 
   it("resumes only missing multipart parts", async () => {

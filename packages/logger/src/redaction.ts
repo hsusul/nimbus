@@ -1,5 +1,5 @@
 const SENSITIVE_KEY_PATTERN =
-  /(authorization|cookie|password|secret|token|api[_-]?key|signature|credential|signed[_-]?url|download[_-]?url|upload[_-]?url)/i;
+  /(authorization|cookie|password|secret|token|api[_-]?key|key[_-]?hash|signature|credential|signed[_-]?url|download[_-]?url|upload[_-]?url)/i;
 
 const SENSITIVE_QUERY_PARAMS = new Set([
   "x-amz-signature",
@@ -57,6 +57,7 @@ export function redactString(value: string): string {
   } catch {
     return value
       .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
+      .replace(/\bnmb_live_[A-Za-z0-9_-]+\b/g, "[REDACTED]")
       .replace(/((?:token|secret|signature|api[_-]?key)=)[^&\s]+/gi, "$1[REDACTED]");
   }
 }

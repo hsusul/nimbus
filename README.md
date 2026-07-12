@@ -41,7 +41,7 @@ All screenshots are generated from deterministic synthetic demo data with `pnpm 
 
 ## Developer Quick Start
 
-Create a key through `POST /api/v1/api-keys`; copy the `nmb_live_...` value immediately because Nimbus returns it only once.
+Create a key through the browser-authenticated `POST /api/v1/api-keys` route; copy the `nmb_live_...` value immediately because Nimbus returns it only once. API keys cannot create, inspect, or revoke keys.
 
 ```ts
 import { NimbusClient } from "@nimbus/sdk";
@@ -59,7 +59,9 @@ nimbus whoami
 nimbus upload ./report.pdf --folder FOLDER_ID
 ```
 
-The CLI prompts for the key and stores it in `~/.config/nimbus/config.json` with mode `0600` on Unix. This is plaintext local storage protected by filesystem permissions, not an OS keychain; use `NIMBUS_API_KEY` and `NIMBUS_API_URL` in managed environments.
+The CLI prompts without echoing the key and stores it in `~/.config/nimbus/config.json` with mode `0600` on Unix. This is plaintext local storage protected by filesystem permissions, not an OS keychain; Unix permission bits are not an equivalent control on Windows. Use `NIMBUS_API_KEY` and `NIMBUS_API_URL` in managed environments.
+
+The SDK and CLI packages are currently private monorepo packages. Their builds are production-checked, but publishing them to a registry is an optional separate release action.
 
 ## Architecture
 
@@ -181,7 +183,7 @@ Run the API and import `http://localhost:4000/api/v1/openapi.json` into an OpenA
 - Public links are view-only and cannot be password protected.
 - Delete is recoverable soft delete; permanent deletion and retention-policy UI are intentionally absent.
 - Thumbnails support JPEG, PNG, and WebP rather than full document preview/conversion.
-- This is a single-region, single-user-workspace architecture without organizations, billing, quotas, notifications, API keys, SDKs, or sync clients.
+- This is a single-region, single-user-workspace architecture without organizations, billing, notifications, or sync clients.
 
 ## Roadmap
 

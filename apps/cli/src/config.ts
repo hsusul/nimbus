@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 
 export interface CliConfig {
@@ -22,7 +22,7 @@ export async function writeConfig(config: CliConfig) {
   const path = defaultConfigPath();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(path, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
-  await chmod(path, 0o600);
+  if (platform() !== "win32") await chmod(path, 0o600);
 }
 export async function removeConfig() {
   await rm(defaultConfigPath(), { force: true });

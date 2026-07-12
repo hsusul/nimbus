@@ -12,6 +12,7 @@ export const ApiKeyScopeSchema = z.enum([
 ]);
 
 export const ApiKeyScopes = ApiKeyScopeSchema.options;
+export const ApiKeyValueSchema = z.string().regex(/^nmb_live_[A-Za-z0-9_-]{43}$/);
 
 export const ApiKeyCreateRequestSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -37,7 +38,7 @@ export const ApiKeyMetadataSchema = z.object({
 
 export const ApiKeyCreateResponseSchema = z.object({
   data: ApiKeyMetadataSchema.extend({
-    key: z.string().startsWith("nmb_live_"),
+    key: ApiKeyValueSchema,
     warning: z.literal("Store this key securely. It will not be shown again."),
   }),
 });

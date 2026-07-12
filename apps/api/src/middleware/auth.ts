@@ -10,6 +10,8 @@ type AuthenticationConfig = Pick<
   "authMode" | "devAuthEnabled" | "deploymentProfile" | "apiAuth"
 >;
 
+export const NIMBUS_API_KEY_PATTERN = /^nmb_live_[A-Za-z0-9_-]{43}$/;
+
 export function authenticationMiddleware(
   config: AuthenticationConfig,
   apiKeyService: ApiKeyService,
@@ -18,6 +20,7 @@ export function authenticationMiddleware(
     try {
       const token = readBearerToken(req.header("authorization"));
       if (token?.startsWith("nmb_live_")) {
+        if (!NIMBUS_API_KEY_PATTERN.test(token)) throw new Error("Invalid API key format.");
         const authenticated = await apiKeyService.authenticate(token);
         if (!authenticated) throw new Error("Invalid API key.");
         req.context.authenticatedUser = authenticated.user;

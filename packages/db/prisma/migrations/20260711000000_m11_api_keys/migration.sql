@@ -20,7 +20,7 @@ CREATE INDEX "api_keys_owner_user_id_status_idx" ON "api_keys"("owner_user_id", 
 CREATE INDEX "api_keys_expires_at_idx" ON "api_keys"("expires_at");
 CREATE UNIQUE INDEX "api_keys_owner_active_name_key"
   ON "api_keys"("owner_user_id", lower("name"))
-  WHERE "revoked_at" IS NULL;
+  WHERE "status" = 'active' AND "revoked_at" IS NULL;
 
 ALTER TABLE "api_keys"
   ADD CONSTRAINT "api_keys_owner_user_id_fkey"

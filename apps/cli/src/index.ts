@@ -3,11 +3,13 @@ import { access, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { Writable } from "node:stream";
 import { readConfig, removeConfig, writeConfig } from "./config";
 
 export async function main(
   argv = process.argv.slice(2),
   io = { out: (v: string) => console.log(v), err: (v: string) => console.error(v) },
+  signal?: AbortSignal,
 ): Promise<number> {
   const json = takeFlag(argv, "--json");
   const command = argv.shift();
@@ -20,19 +22,22 @@ export async function main(
       const apiUrl =
         takeOption(argv, "--url") ?? process.env.NIMBUS_API_URL ?? "http://localhost:4000";
       let apiKey = process.env.NIMBUS_API_KEY;
-      if (!apiKey) {
-        const rl = createInterface({ input: stdin, output: stdout });
-        apiKey = await rl.question("Nimbus API key: ");
-        rl.close();
-      }
-      if (!apiKey?.startsWith("nmb_live_")) throw new Error("Invalid Nimbus API key format.");
+      if (!apiKey) apiKey = await readSecret("Nimbus API key: ");
+      if (!/^nmb_live_[A-Za-z0-9_-]{43}$/.test(apiKey))
+        throw new Error("Invalid Nimbus API key format.");
       await writeConfig({ apiUrl, apiKey });
-      io.out("Nimbus credentials saved with user-only permissions.");
+      io.out(
+        json
+          ? JSON.stringify({ data: { authenticated: true, apiUrl } })
+          : "Nimbus credentials saved with user-only permissions.",
+      );
       return 0;
     }
     if (command === "logout") {
       await removeConfig();
-      io.out("Nimbus credentials removed.");
+      io.out(
+        json ? JSON.stringify({ data: { authenticated: false } }) : "Nimbus credentials removed.",
+      );
       return 0;
     }
     const config = await readConfig();
@@ -81,6 +86,7 @@ export async function main(
       };
       result = await client.uploadFile(source, {
         folderId: takeOption(argv, "--folder") ?? (await client.getCurrentUser()).data.rootFolderId,
+        signal,
         onProgress: (e) => {
           if (!json) io.err(`${e.status} ${e.percent}%`);
         },
@@ -101,30 +107,13 @@ export async function main(
       if (!response.ok) throw new Error(`Download failed (${response.status}).`);
       await writeFile(output, Buffer.from(await response.arrayBuffer()));
       result = { output };
-    } else if (command === "api-key") {
-      const action = argv.shift();
-      if (action === "list") result = await client.listApiKeys();
-      else if (action === "revoke") result = await client.revokeApiKey(required(argv[0], "id"));
-      else if (action === "create")
-        result = await client.createApiKey({
-          name: takeOption(argv, "--name") ?? "Nimbus CLI",
-          scopes: (
-            takeOption(argv, "--scopes") ??
-            "files:read,files:write,uploads:write,shares:read,shares:write,jobs:read,trash:read,trash:write"
-          ).split(",") as never,
-        });
-      else throw new Error("Use api-key create, list, or revoke.");
     } else throw new Error(`Unknown command: ${command}`);
     io.out(json ? JSON.stringify(result) : format(result));
     return 0;
   } catch (error) {
-    io.err(
-      error instanceof NimbusError
-        ? `${error.code}: ${error.message}`
-        : error instanceof Error
-          ? error.message
-          : "Nimbus command failed.",
-    );
+    const code = error instanceof NimbusError ? error.code : "cli_error";
+    const message = error instanceof Error ? error.message : "Nimbus command failed.";
+    io.err(json ? JSON.stringify({ error: { code, message } }) : `${code}: ${message}`);
     return 1;
   }
 }
@@ -150,6 +139,32 @@ function format(value: unknown) {
 }
 export const help = `Nimbus CLI
 Commands: login, logout, whoami, ls, mkdir, upload, download, search, versions,
-restore-version, share, public-link, jobs, trash, api-key create|list|revoke
+restore-version, share, public-link, jobs, trash
 Global: --json`;
-if (import.meta.url === `file://${process.argv[1]}`) process.exitCode = await main();
+async function readSecret(prompt: string) {
+  stdout.write(prompt);
+  const mutedOutput = new Writable({
+    write(_chunk, _encoding, callback) {
+      callback();
+    },
+  });
+  const rl = createInterface({ input: stdin, output: mutedOutput, terminal: Boolean(stdin.isTTY) });
+  try {
+    return await rl.question("");
+  } finally {
+    rl.close();
+    stdout.write("\n");
+  }
+}
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  process.once("SIGINT", abort);
+  process.once("SIGTERM", abort);
+  try {
+    process.exitCode = await main(process.argv.slice(2), undefined, controller.signal);
+  } finally {
+    process.removeListener("SIGINT", abort);
+    process.removeListener("SIGTERM", abort);
+  }
+}

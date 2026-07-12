@@ -1,7 +1,4 @@
 import {
-  ApiKeyCreateResponseSchema,
-  ApiKeyListResponseSchema,
-  ApiKeyResponseSchema,
   FileDownloadResponseSchema,
   FileListResponseSchema,
   FileResponseSchema,
@@ -24,7 +21,6 @@ import {
   UploadStartResponseSchema,
   RegisterUploadChunkResponseSchema,
   ErrorEnvelopeSchema,
-  type ApiKeyCreateRequest,
   type JobListQuery,
   type SearchQuery,
   type ShareCreateRequest,
@@ -77,8 +73,17 @@ export class NimbusClient {
   private readonly fetcher: typeof fetch;
   private readonly baseUrl: string;
   constructor(private readonly options: NimbusClientOptions) {
-    if (!options.apiKey.startsWith("nmb_live_")) throw new Error("A Nimbus API key is required.");
-    this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    if (!/^nmb_live_[A-Za-z0-9_-]{43}$/.test(options.apiKey))
+      throw new Error("A valid Nimbus API key is required.");
+    const baseUrl = new URL(options.baseUrl);
+    if (!/^https?:$/.test(baseUrl.protocol) || baseUrl.username || baseUrl.password)
+      throw new Error("Nimbus baseUrl must be an HTTP(S) URL without credentials.");
+    if (baseUrl.pathname !== "/")
+      throw new Error("Nimbus baseUrl must be an origin without a path.");
+    if (options.timeoutMs !== undefined) boundedInteger(options.timeoutMs, "timeoutMs", 1, 300_000);
+    baseUrl.search = "";
+    baseUrl.hash = "";
+    this.baseUrl = baseUrl.href.replace(/\/$/, "");
     this.fetcher = options.fetch ?? fetch;
   }
   getCurrentUser = () => this.request("/api/v1/me", MeResponseSchema);
@@ -153,20 +158,21 @@ export class NimbusClient {
     this.request(`/api/v1/jobs${query(input)}`, JobListResponseSchema);
   getJob = (id: string) => this.request(`/api/v1/jobs/${e(id)}`, JobDetailResponseSchema);
   listTrash = () => this.request("/api/v1/trash", TrashListResponseSchema);
-  createApiKey = (input: ApiKeyCreateRequest) =>
-    this.request("/api/v1/api-keys", ApiKeyCreateResponseSchema, { method: "POST", body: input });
-  listApiKeys = () => this.request("/api/v1/api-keys", ApiKeyListResponseSchema);
-  revokeApiKey = (id: string) =>
-    this.request(`/api/v1/api-keys/${e(id)}`, ApiKeyResponseSchema, { method: "DELETE" });
-
   async uploadFile(source: UploadSource, options: UploadOptions) {
-    const progress = (status: UploadProgress["status"], uploadedBytes: number) =>
+    if (!Number.isSafeInteger(source.size) || source.size < 0)
+      throw new Error("Upload size must be a non-negative safe integer.");
+    const concurrency = boundedInteger(options.concurrency ?? 3, "concurrency", 1, 16);
+    const attempts = boundedInteger(options.retries ?? 3, "retries", 1, 10);
+    let reportedBytes = 0;
+    const progress = (status: UploadProgress["status"], uploadedBytes: number) => {
+      reportedBytes = Math.max(reportedBytes, uploadedBytes);
       options.onProgress?.({
         status,
-        uploadedBytes,
+        uploadedBytes: reportedBytes,
         totalBytes: source.size,
-        percent: source.size ? Math.round((uploadedBytes / source.size) * 100) : 0,
+        percent: source.size ? Math.round((reportedBytes / source.size) * 100) : 0,
       });
+    };
     progress("starting", 0);
     const started = options.resumeSessionId
       ? null
@@ -196,7 +202,12 @@ export class NimbusClient {
         const signed = started?.data.signedUpload;
         if (!signed)
           throw new Error("Single-part uploads cannot be resumed without a fresh signed URL.");
-        await this.storagePut(signed.url, source.slice(), signed.headers, options.signal);
+        await retry(
+          () => this.storagePut(signed.url, source.slice(), signed.headers, options.signal),
+          attempts,
+          isRetryable,
+          options.signal,
+        );
         progress("uploading", source.size);
       } else {
         const chunkSize = Number(
@@ -207,14 +218,16 @@ export class NimbusClient {
         let bytes = Number(detail?.data.receivedBytes ?? 0);
         await concurrent(
           parts.filter((p) => !uploaded.has(p.partNumber)),
-          options.concurrency ?? 3,
+          concurrency,
           async (part) => {
             const start = (part.partNumber - 1) * chunkSize,
               end = Math.min(start + chunkSize, source.size);
             const response = await retry(
               () =>
                 this.storagePut(part.url, source.slice(start, end), part.headers, options.signal),
-              options.retries ?? 3,
+              attempts,
+              isRetryable,
+              options.signal,
             );
             const etag = response.headers.get("etag")?.replaceAll('"', "");
             if (!etag) throw new Error("Storage did not return a part ETag.");
@@ -225,7 +238,9 @@ export class NimbusClient {
                   { partNumber: part.partNumber, etag, sizeBytes: String(end - start) },
                   options.signal,
                 ),
-              options.retries ?? 3,
+              attempts,
+              isRetryable,
+              options.signal,
             );
             bytes += end - start;
             progress("uploading", bytes);
@@ -302,7 +317,8 @@ export class NimbusClient {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 30000);
     const abort = () => controller.abort();
-    init.signal?.addEventListener("abort", abort, { once: true });
+    if (init.signal?.aborted) controller.abort();
+    else init.signal?.addEventListener("abort", abort, { once: true });
     try {
       const headers: Record<string, string> = { authorization: `Bearer ${this.options.apiKey}` };
       if (init.body !== undefined) headers["content-type"] = "application/json";
@@ -341,16 +357,34 @@ function query(values: Record<string, unknown>) {
     if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
   return p.size ? `?${p}` : "";
 }
-async function retry<T>(fn: () => Promise<T>, attempts: number) {
+async function retry<T>(
+  fn: () => Promise<T>,
+  attempts: number,
+  shouldRetry: (error: unknown) => boolean,
+  signal?: AbortSignal,
+) {
   let error: unknown;
   for (let i = 0; i < attempts; i++)
     try {
       return await fn();
     } catch (e) {
       error = e;
-      if (i + 1 < attempts) await wait(100 * 2 ** i);
+      if (!shouldRetry(e) || i + 1 >= attempts) throw e;
+      await wait(100 * 2 ** i, signal);
     }
   throw error;
+}
+function isRetryable(error: unknown) {
+  return (
+    (error instanceof NimbusError &&
+      (error.status === 408 || error.status === 429 || error.status >= 500)) ||
+    error instanceof TypeError
+  );
+}
+function boundedInteger(value: number, name: string, min: number, max: number) {
+  if (!Number.isInteger(value) || value < min || value > max)
+    throw new Error(`${name} must be an integer between ${min} and ${max}.`);
+  return value;
 }
 async function concurrent<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
   let i = 0;
@@ -365,14 +399,18 @@ async function concurrent<T>(items: T[], limit: number, fn: (item: T) => Promise
 }
 function wait(ms: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new DOMException("Aborted", "AbortError"));
-      },
-      { once: true },
-    );
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }

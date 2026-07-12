@@ -7,6 +7,7 @@ import { appendAuditLog, type AuditContext } from "./audit-log";
 import type { InternalUser } from "./users";
 
 const KEY_PREFIX = "nmb_live_";
+const KEY_PATTERN = /^nmb_live_[A-Za-z0-9_-]{43}$/;
 const MAX_ACTIVE_KEYS = 20;
 const MAX_EXPIRY_MS = 366 * 24 * 60 * 60 * 1000;
 const LAST_USED_THROTTLE_MS = 5 * 60 * 1000;
@@ -48,7 +49,7 @@ export class PrismaApiKeyService implements ApiKeyService {
   ) {}
 
   async authenticate(rawKey: string): Promise<ApiKeyAuthentication | null> {
-    if (!rawKey.startsWith(KEY_PREFIX) || rawKey.length < 40) return null;
+    if (!KEY_PATTERN.test(rawKey)) return null;
     const prefix = rawKey.slice(0, 20);
     const record = await this.prisma.apiKey.findUnique({
       where: { prefix },
@@ -105,26 +106,29 @@ export class PrismaApiKeyService implements ApiKeyService {
         "API key expiration must be in the future and within 366 days.",
       );
     }
-    const activeCount = await this.prisma.apiKey.count({
-      where: {
-        ownerId: owner.id,
-        status: "active",
-        revokedAt: null,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-      },
-    });
-    if (activeCount >= MAX_ACTIVE_KEYS)
-      throw new HttpError(
-        409,
-        "api_key_limit_reached",
-        "The active API key limit has been reached.",
-      );
-
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const key = `${KEY_PREFIX}${randomBytes(32).toString("base64url")}`;
       const prefix = key.slice(0, 20);
       try {
         const record = await this.prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${owner.id}, 0)) IS NULL AS locked`;
+          await tx.apiKey.updateMany({
+            where: {
+              ownerId: owner.id,
+              status: "active",
+              expiresAt: { lte: now },
+            },
+            data: { status: "expired" },
+          });
+          const activeCount = await tx.apiKey.count({
+            where: { ownerId: owner.id, status: "active", revokedAt: null },
+          });
+          if (activeCount >= MAX_ACTIVE_KEYS)
+            throw new HttpError(
+              409,
+              "api_key_limit_reached",
+              "The active API key limit has been reached.",
+            );
           const created = await tx.apiKey.create({
             data: {
               ownerId: owner.id,
@@ -168,12 +172,12 @@ export class PrismaApiKeyService implements ApiKeyService {
   async list(ownerId: string) {
     return (
       await this.prisma.apiKey.findMany({ where: { ownerId }, orderBy: { createdAt: "desc" } })
-    ).map(mapApiKey);
+    ).map((record) => mapApiKey(record, this.now()));
   }
   async get(ownerId: string, apiKeyId: string) {
     const record = await this.prisma.apiKey.findFirst({ where: { id: apiKeyId, ownerId } });
     if (!record) throw new HttpError(404, "api_key_not_found", "API key not found.");
-    return mapApiKey(record);
+    return mapApiKey(record, this.now());
   }
   async revoke(ownerId: string, apiKeyId: string, audit: AuditContext) {
     const existing = await this.prisma.apiKey.findFirst({ where: { id: apiKeyId, ownerId } });
@@ -212,13 +216,16 @@ function safeEqual(left: string, right: string) {
   const b = Buffer.from(right);
   return a.length === b.length && timingSafeEqual(a, b);
 }
-function mapApiKey(record: ApiKey): ApiKeyDto {
+function mapApiKey(record: ApiKey, now = new Date()): ApiKeyDto {
   return {
     id: record.id,
     name: record.name,
     prefix: record.prefix,
     scopes: record.scopes as ApiKeyScope[],
-    status: record.status,
+    status:
+      record.status === "active" && record.expiresAt && record.expiresAt <= now
+        ? "expired"
+        : record.status,
     createdAt: record.createdAt.toISOString(),
     lastUsedAt: record.lastUsedAt?.toISOString() ?? null,
     expiresAt: record.expiresAt?.toISOString() ?? null,

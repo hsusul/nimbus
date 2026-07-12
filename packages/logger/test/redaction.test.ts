@@ -19,6 +19,7 @@ describe("logger redaction", () => {
       token: "raw-token",
       nested: {
         apiKey: "api-secret",
+        keyHash: "sha256-secret",
         normal: "visible",
       },
     });
@@ -27,9 +28,17 @@ describe("logger redaction", () => {
       token: "[REDACTED]",
       nested: {
         apiKey: "[REDACTED]",
+        keyHash: "[REDACTED]",
         normal: "visible",
       },
     });
+  });
+
+  it("redacts raw Nimbus API keys embedded in strings", () => {
+    const raw = `nmb_live_${"a".repeat(43)}`;
+    expect(redactString(`Authentication failed for ${raw}`)).toBe(
+      "Authentication failed for [REDACTED]",
+    );
   });
 
   it("emits structured JSON with request and correlation IDs", () => {

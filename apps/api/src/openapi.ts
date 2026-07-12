@@ -74,7 +74,8 @@ export function createOpenApiDocument(publicApiUrl: string) {
     type: "http",
     scheme: "bearer",
     bearerFormat: "JWT or nmb_live_ API key",
-    description: "Short-lived browser token or scoped personal Nimbus API key.",
+    description:
+      "Short-lived browser token or scoped personal Nimbus API key. API-key management and audit-log routes require a browser token.",
   });
   const errorSchema = registry.register("ErrorEnvelope", ErrorEnvelopeSchema);
   const schemas = {
@@ -143,7 +144,7 @@ export function createOpenApiDocument(publicApiUrl: string) {
     {
       method: "post",
       path: "/api/v1/api-keys",
-      summary: "Create a personal API key",
+      summary: "Create a personal API key (browser token only)",
       tag: "API Keys",
       body: ApiKeyCreateRequestSchema,
       response: schemas.apiKeyCreate,
@@ -152,14 +153,14 @@ export function createOpenApiDocument(publicApiUrl: string) {
     {
       method: "get",
       path: "/api/v1/api-keys",
-      summary: "List personal API keys",
+      summary: "List personal API keys (browser token only)",
       tag: "API Keys",
       response: schemas.apiKeys,
     },
     {
       method: "get",
       path: "/api/v1/api-keys/{apiKeyId}",
-      summary: "Get API key metadata",
+      summary: "Get API key metadata (browser token only)",
       tag: "API Keys",
       params: ["apiKeyId"],
       response: schemas.apiKey,
@@ -167,7 +168,7 @@ export function createOpenApiDocument(publicApiUrl: string) {
     {
       method: "delete",
       path: "/api/v1/api-keys/{apiKeyId}",
-      summary: "Revoke an API key",
+      summary: "Revoke an API key (browser token only)",
       tag: "API Keys",
       params: ["apiKeyId"],
       response: schemas.apiKey,

@@ -50,6 +50,12 @@ describe("CLI", () => {
       await main(["whoami", "--json"], { out: (v) => out.push(v), err: (v) => out.push(v) }),
     ).toBe(0);
     expect(JSON.parse(out[0]!).data.id).toBe("u");
-    expect(await main(["unknown"], { out: (v) => out.push(v), err: (v) => out.push(v) })).toBe(1);
+    expect(
+      await main(["unknown", "--json"], { out: (v) => out.push(v), err: (v) => out.push(v) }),
+    ).toBe(1);
+    expect(JSON.parse(out.at(-1)!).error).toMatchObject({
+      code: "cli_error",
+      message: "Unknown command: unknown",
+    });
   });
 });
