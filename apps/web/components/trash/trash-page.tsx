@@ -1,7 +1,8 @@
 "use client";
 
 import type { TrashItem } from "@nimbus/contracts";
-import { RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, RotateCcw } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { formatDate, formatFileSize, formatMimeType } from "../../lib/formatters";
@@ -119,7 +120,11 @@ export function TrashPage() {
         <EmptyState
           title="Trash is empty"
           description="Deleted files and folders will appear here until restored."
-          action={<Trash2 aria-hidden="true" size={20} />}
+          action={
+            <Link className="button button--secondary button--default" href="/files">
+              <ArrowLeft aria-hidden="true" size={16} /> Return to files
+            </Link>
+          }
         />
       )}
       {hasMore ? (

@@ -94,7 +94,7 @@ export function SearchPage() {
         <div className="page-header__main">
           <div>
             <h1>Search</h1>
-            <p>Owned folders and files you can currently access.</p>
+            <p>Use advanced filters across files and folders you can access.</p>
           </div>
         </div>
       </header>
@@ -141,7 +141,7 @@ export function SearchPage() {
       {!query.trim() ? (
         <EmptyState
           title="Search Nimbus"
-          description="Enter a name, extension, or MIME term to find authorized metadata."
+          description="Search object names, extensions, or MIME types across resources you can access."
         />
       ) : loading && !results.length ? (
         <TableSkeleton />

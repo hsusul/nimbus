@@ -52,6 +52,18 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const [completionRevision, setCompletionRevision] = useState(0);
   const [expanded, setExpanded] = useState(true);
   const mounted = useRef(true);
+  const activeCount = items.filter((item) =>
+    ["starting", "uploading", "completing"].includes(item.status),
+  ).length;
+  const failedCount = items.filter((item) => item.status === "failed").length;
+  const completedCount = items.filter((item) => item.status === "completed").length;
+  const uploadSummary = [
+    activeCount ? `${activeCount} active` : "",
+    failedCount ? `${failedCount} failed` : "",
+    completedCount ? `${completedCount} complete` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   useEffect(() => {
     mounted.current = true;
@@ -178,7 +190,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             <div>
               <UploadCloud aria-hidden="true" size={18} />
               <strong>Uploads</strong>
-              <span>{items.length}</span>
+              <span className="upload-tray__summary">
+                {uploadSummary || `${items.length} queued`}
+              </span>
             </div>
             <Button
               variant="ghost"

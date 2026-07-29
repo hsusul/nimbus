@@ -8,6 +8,7 @@ import { createLogger } from "@nimbus/logger";
 import { S3CompatibleStorageProvider } from "@nimbus/storage";
 import { Worker } from "bullmq";
 
+import { createWorkerLifecycle } from "./lifecycle";
 import {
   finalizeUploadSession,
   markUploadFinalizationJobDeadLettered,
@@ -131,8 +132,7 @@ for (const worker of [metadataIndexingWorker, thumbnailGenerationWorker, objectC
 }
 
 async function main() {
-  await connection.ping();
-  await schedulePendingCleanupJobs(postUploadQueues);
+  await lifecycle.start();
 
   logger.info("worker_started", {
     registeredQueues: [...registeredQueues],
@@ -140,13 +140,27 @@ async function main() {
   });
 }
 
-const cleanupSchedule = setInterval(() => {
-  void schedulePendingCleanupJobs(postUploadQueues);
-}, 60_000);
+const lifecycle = createWorkerLifecycle({
+  logger,
+  initialize: async () => {
+    await connection.ping();
+    await schedulePendingCleanupJobs(postUploadQueues);
+  },
+  runMaintenance: () => schedulePendingCleanupJobs(postUploadQueues),
+  workers: [
+    uploadFinalizationWorker,
+    metadataIndexingWorker,
+    thumbnailGenerationWorker,
+    objectCleanupWorker,
+  ],
+  queues: Object.values(postUploadQueues),
+  connection,
+});
 
-main().catch((error: unknown) => {
+void main().catch((error: unknown) => {
   logger.error("worker_start_failed", {
-    error: error instanceof Error ? error.message : String(error),
+    failure_code: "startup_failed",
+    error_category: error instanceof Error ? error.name : "unknown_error",
   });
   process.exitCode = 1;
 });
@@ -154,31 +168,7 @@ main().catch((error: unknown) => {
 process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
-let shutdownPromise: Promise<void> | null = null;
-
-function shutdown(signal: string) {
-  shutdownPromise ??= runShutdown(signal);
-  return shutdownPromise;
-}
-
-async function runShutdown(signal: string) {
-  clearInterval(cleanupSchedule);
-  logger.info("worker_stopping", { signal, policy: "finish_active_jobs" });
-  try {
-    await Promise.all([
-      uploadFinalizationWorker.close(),
-      metadataIndexingWorker.close(),
-      thumbnailGenerationWorker.close(),
-      objectCleanupWorker.close(),
-    ]);
-    await Promise.all(Object.values(postUploadQueues).map((queue) => queue.close()));
-    await connection.quit();
-    logger.info("worker_stopped");
-  } catch (error) {
-    logger.error("worker_shutdown_failed", {
-      failure_code: "shutdown_failed",
-      error_category: error instanceof Error ? error.name : "unknown_error",
-    });
-    process.exitCode = 1;
-  }
+async function shutdown(signal: string) {
+  const result = await lifecycle.shutdown(signal);
+  if (!result.ok) process.exitCode = 1;
 }
