@@ -80,34 +80,30 @@ export function TrashPage() {
         <section className="trash-list" aria-label="Deleted resources">
           <div className="resource-table__head trash-list__head">
             <span>Name</span>
-            <span>Type</span>
             <span>Size</span>
             <span>Deleted</span>
-            <span>Action</span>
+            <span className="sr-only">Action</span>
           </div>
           {items.map((item) => (
             <div className="trash-row" key={`${item.resourceType}-${item.resourceId}`}>
               <span className="resource-row__name">
-                <span className="thumbnail">
-                  <ResourceIcon
-                    type={item.resourceType}
-                    mimeType={item.resourceType === "file" ? item.mimeType : null}
-                  />
-                </span>
-                <span>
-                  <strong>{item.name}</strong>
-                  <small>
-                    {item.resourceType === "file" ? formatMimeType(item.mimeType) : "Folder"}
-                  </small>
+                <ResourceIcon
+                  type={item.resourceType}
+                  mimeType={item.resourceType === "file" ? item.mimeType : null}
+                />
+                <span className="resource-row__label">
+                  <strong title={item.name}>{item.name}</strong>
+                  {item.resourceType === "file" ? (
+                    <small>{formatMimeType(item.mimeType)}</small>
+                  ) : null}
                 </span>
               </span>
-              <span data-label="Type">
-                {item.resourceType === "file" ? formatMimeType(item.mimeType) : "Folder"}
-              </span>
-              <span data-label="Size">
+              <span data-label="Size" className="tabular">
                 {item.resourceType === "file" ? formatFileSize(item.sizeBytes) : "-"}
               </span>
-              <span data-label="Deleted">{formatDate(item.deletedAt)}</span>
+              <span data-label="Deleted" className="tabular">
+                {formatDate(item.deletedAt)}
+              </span>
               <span>
                 <Button size="small" onClick={() => setRestoreItem(item)}>
                   <RotateCcw aria-hidden="true" size={14} /> Restore

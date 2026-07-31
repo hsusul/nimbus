@@ -40,15 +40,19 @@ test.describe.serial("Nimbus M9 console", () => {
     await ownerPage.goto("/files");
     await expect(ownerPage.getByRole("heading", { name: "Root" })).toBeVisible();
     measurements.initialFilesPageMs = round(performance.now() - started);
+    // Account details moved from an always-visible top-bar block into the
+    // account menu, so the identity is asserted where it now lives.
+    await ownerPage.getByRole("button", { name: /^Account:/ }).click();
     await expect(ownerPage.getByText(owner.email)).toBeVisible();
+    await ownerPage.keyboard.press("Escape");
     await ownerContext.setExtraHTTPHeaders({});
 
     await ownerPage.getByRole("button", { name: "New folder" }).click();
     const folderNameInput = ownerPage.getByLabel("Name");
     await folderNameInput.pressSequentially(folderName);
     await expect(folderNameInput).toHaveValue(folderName);
-    await ownerPage.getByRole("button", { name: "Save" }).click();
-    const folderRow = ownerPage.getByRole("button", { name: new RegExp(folderName) });
+    await ownerPage.getByRole("button", { name: "Create folder" }).click();
+    const folderRow = ownerPage.getByRole("button", { name: new RegExp("^" + folderName) });
     await expect(folderRow).toBeVisible();
     started = performance.now();
     await folderRow.click();
@@ -73,11 +77,13 @@ test.describe.serial("Nimbus M9 console", () => {
     await ownerPage.getByRole("link", { name: "Search" }).click();
     started = performance.now();
     await ownerPage.getByRole("searchbox", { name: "Search files and folders" }).fill(textFileName);
-    await expect(ownerPage.getByRole("button", { name: new RegExp(textFileName) })).toBeVisible();
+    await expect(
+      ownerPage.getByRole("button", { name: new RegExp("^" + textFileName) }),
+    ).toBeVisible();
     measurements.searchDisplayMs = round(performance.now() - started);
 
-    await ownerPage.getByRole("link", { name: "Files" }).click();
-    await ownerPage.getByRole("button", { name: new RegExp(folderName) }).click();
+    await ownerPage.getByRole("link", { name: "My Files" }).click();
+    await ownerPage.getByRole("button", { name: new RegExp("^" + folderName) }).click();
     await openAction(ownerPage, textFileName, "Versions");
     await expect(ownerPage.getByRole("heading", { name: textFileName })).toBeVisible();
     const versionChooser = ownerPage.waitForEvent("filechooser");
@@ -168,8 +174,8 @@ test.describe.serial("Nimbus M9 console", () => {
     measurements.jobsDisplayMs = round(performance.now() - started);
     await expect(ownerPage.locator("body")).not.toContainText(/objectKey|bucket|stack trace/i);
 
-    await ownerPage.getByRole("link", { name: "Files" }).click();
-    await ownerPage.getByRole("button", { name: new RegExp(folderName) }).click();
+    await ownerPage.getByRole("link", { name: "My Files" }).click();
+    await ownerPage.getByRole("button", { name: new RegExp("^" + folderName) }).click();
     await openAction(ownerPage, imageFileName, "Move to trash");
     await ownerPage.getByRole("button", { name: "Move to Trash", exact: true }).click();
     await ownerPage.getByRole("link", { name: "Trash" }).click();
@@ -199,8 +205,10 @@ test.describe.serial("Nimbus M9 console", () => {
 
     await ownerPage.getByRole("button", { name: "New folder" }).click();
     await ownerPage.getByLabel("Name").fill(dragFolderName);
-    await ownerPage.getByRole("button", { name: "Save" }).click();
-    await expect(ownerPage.getByRole("button", { name: new RegExp(dragFolderName) })).toBeVisible();
+    await ownerPage.getByRole("button", { name: "Create folder" }).click();
+    await expect(
+      ownerPage.getByRole("button", { name: new RegExp("^" + dragFolderName) }),
+    ).toBeVisible();
 
     const chooser = ownerPage.waitForEvent("filechooser");
     await ownerPage.getByRole("button", { name: "Upload", exact: true }).click();
@@ -227,20 +235,18 @@ test.describe.serial("Nimbus M9 console", () => {
     await expect(secondFileRow).toBeVisible({ timeout: 45_000 });
     await fileRow.locator(".resource-row__name").click({ modifiers: ["Meta"] });
     await secondFileRow.locator(".resource-row__name").click({ modifiers: ["Meta"] });
-    await expect(
-      ownerPage.locator(".resource-table__name-header").getByText("2 selected"),
-    ).toBeVisible();
+    await expect(ownerPage.locator(".selection-bar").getByText("2 selected")).toBeVisible();
     await fileRow.dragTo(destinationRow);
     await expect(ownerPage.getByText(`2 items moved to ${dragFolderName}.`)).toBeVisible();
     await expect(fileRow).not.toBeVisible();
     await expect(secondFileRow).not.toBeVisible();
 
-    await ownerPage.getByRole("button", { name: new RegExp(dragFolderName) }).click();
+    await ownerPage.getByRole("button", { name: new RegExp("^" + dragFolderName) }).click();
     await expect(ownerPage.getByRole("heading", { name: dragFolderName })).toBeVisible();
     await expect(ownerPage.getByText(dragFileName).first()).toBeVisible();
     await expect(ownerPage.getByText(secondDragFileName).first()).toBeVisible();
     await openAction(ownerPage, dragFileName, "Move");
-    let moveDialog = ownerPage.getByRole("dialog", { name: "Move file" });
+    let moveDialog = ownerPage.getByRole("dialog", { name: `Move ${dragFileName}` });
     await expect(moveDialog.getByText("Destination folder ID")).toHaveCount(0);
     await expect(moveDialog.getByRole("button", { name: "Browse all folders" })).toBeVisible();
     await moveDialog.getByRole("button", { name: "Browse all folders" }).click();
@@ -248,7 +254,7 @@ test.describe.serial("Nimbus M9 console", () => {
       moveDialog.getByRole("navigation", { name: "Folder picker breadcrumb" }),
     ).toBeVisible();
     await moveDialog.getByRole("button", { name: "Choose this folder" }).click();
-    await moveDialog.getByRole("button", { name: "Save" }).click();
+    await moveDialog.getByRole("button", { name: "Move to Root", exact: true }).click();
     await expect(ownerPage.getByText(`${dragFileName} moved to Root.`)).toBeVisible();
 
     await ownerPage
@@ -257,9 +263,11 @@ test.describe.serial("Nimbus M9 console", () => {
       .click();
     await expect(ownerPage.getByText(dragFileName).first()).toBeVisible();
     await openAction(ownerPage, dragFileName, "Move");
-    moveDialog = ownerPage.getByRole("dialog", { name: "Move file" });
+    moveDialog = ownerPage.getByRole("dialog", { name: `Move ${dragFileName}` });
     await moveDialog.getByRole("button", { name: dragFolderName, exact: true }).click();
-    await moveDialog.getByRole("button", { name: "Save" }).click();
+    await moveDialog
+      .getByRole("button", { name: `Move to ${dragFolderName}`, exact: true })
+      .click();
     await expect(ownerPage.getByText(`${dragFileName} moved to ${dragFolderName}.`)).toBeVisible();
   });
 
@@ -317,9 +325,9 @@ async function verifyRoleAccess(
   const context = await contextFor(browser, value);
   const page = await context.newPage();
   await page.goto(`/search?q=${encodeURIComponent(fileName)}`);
-  await expect(page.getByRole("button", { name: new RegExp(fileName) })).toBeVisible();
+  await expect(page.getByRole("button", { name: new RegExp("^" + fileName) })).toBeVisible();
   await context.setExtraHTTPHeaders({});
-  await page.getByRole("button", { name: new RegExp(fileName) }).click();
+  await page.getByRole("button", { name: new RegExp("^" + fileName) }).click();
   await expect(
     page
       .getByLabel("File details", { exact: true })
@@ -371,19 +379,21 @@ async function verifyRevokedAccess(
   await expect(page.getByRole("button", { name: "New version" })).toHaveCount(0);
   await context.setExtraHTTPHeaders({});
   await page.goto(`/search?q=${encodeURIComponent(fileName)}`);
-  await expect(page.getByRole("button", { name: new RegExp(fileName) })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: new RegExp("^" + fileName) })).toHaveCount(0);
   await context.close();
 }
 
+// Action-menu entries now expose role="menuitem" instead of a plain button,
+// because the menu was rebuilt on the WAI-ARIA menu button pattern.
 async function openAction(page: Page, fileName: string, action: string) {
   await page.getByLabel(`Actions for ${fileName}`).click();
-  await page.getByRole("button", { name: action, exact: true }).click();
+  await page.getByRole("menuitem", { name: action, exact: true }).click();
 }
 
 async function downloadFromRow(page: Page, fileName: string) {
   await page.getByLabel(`Actions for ${fileName}`).click();
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Download", exact: true }).click();
   await (await download).cancel();
 }
 

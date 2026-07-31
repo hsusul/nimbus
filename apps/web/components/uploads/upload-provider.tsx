@@ -1,6 +1,5 @@
 "use client";
 
-import { ChevronDown, ChevronUp, RotateCcw, UploadCloud, X } from "lucide-react";
 import {
   createContext,
   useCallback,
@@ -13,7 +12,6 @@ import {
 } from "react";
 
 import { getErrorMessage } from "../../lib/api-errors";
-import { formatFileSize } from "../../lib/formatters";
 import {
   fileMatchesResumeRecord,
   readResumeRecords,
@@ -23,17 +21,23 @@ import {
   cancelUpload as cancelUploadRequest,
   uploadFile,
   type UploadProgressEvent,
-  type UploadUiStatus,
 } from "../../lib/uploads/upload-client";
 import { useConsole } from "../console-runtime";
-import { StatusBadge } from "../ui/badges";
-import { Button } from "../ui/button";
+import { UploadTray, type UploadTrayItem } from "./upload-tray";
 
 interface UploadItem extends UploadProgressEvent {
   key: string;
   name: string;
   error?: string;
   controller: AbortController;
+  /**
+   * Retained so a failed upload can be retried without re-picking the file.
+   * Released once the upload reaches a state that cannot be retried, so a long
+   * session that uploads many files does not pin every one of their handles.
+   */
+  file?: File;
+  destinationFolderId: string;
+  targetFileId?: string;
 }
 
 interface UploadContextValue {
@@ -52,18 +56,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const [completionRevision, setCompletionRevision] = useState(0);
   const [expanded, setExpanded] = useState(true);
   const mounted = useRef(true);
-  const activeCount = items.filter((item) =>
-    ["starting", "uploading", "completing"].includes(item.status),
-  ).length;
-  const failedCount = items.filter((item) => item.status === "failed").length;
-  const completedCount = items.filter((item) => item.status === "completed").length;
-  const uploadSummary = [
-    activeCount ? `${activeCount} active` : "",
-    failedCount ? `${failedCount} failed` : "",
-    completedCount ? `${completedCount} complete` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
   useEffect(() => {
     mounted.current = true;
@@ -73,11 +65,11 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Collapse once everything has settled, so the tray stops covering content.
   useEffect(() => {
     const allSettled =
       items.length > 0 && items.every((item) => ["completed", "canceled"].includes(item.status));
     if (!expanded || !allSettled) return;
-
     const collapseTimer = window.setTimeout(() => setExpanded(false), 2_500);
     return () => window.clearTimeout(collapseTimer);
   }, [expanded, items]);
@@ -87,9 +79,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       file: File,
       destinationFolderId: string,
       targetFileId?: string,
-      resume?: UploadResumeRecord,
+      resumeRecord?: UploadResumeRecord,
+      existingKey?: string,
     ) => {
-      const key = resume?.uploadSessionId ?? crypto.randomUUID();
+      const key = existingKey ?? resumeRecord?.uploadSessionId ?? crypto.randomUUID();
       const controller = new AbortController();
       const base: UploadItem = {
         key,
@@ -100,47 +93,56 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         percent: 0,
         completedParts: 0,
         totalParts: 1,
-        uploadSessionId: resume?.uploadSessionId,
-        fileId: resume?.fileId,
+        uploadSessionId: resumeRecord?.uploadSessionId,
+        fileId: resumeRecord?.fileId,
         controller,
+        file,
+        destinationFolderId,
+        targetFileId,
       };
       setItems((current) => [base, ...current.filter((item) => item.key !== key)]);
+
       try {
         await uploadFile({
           api,
           file,
           destinationFolderId,
           targetFileId,
-          resume,
+          resume: resumeRecord,
           signal: controller.signal,
           storage: window.localStorage,
           onProgress: (progress) => {
-            if (mounted.current) {
-              setItems((current) =>
-                current.map((item) => (item.key === key ? { ...item, ...progress } : item)),
-              );
-            }
+            if (!mounted.current) return;
+            setItems((current) =>
+              current.map((item) => (item.key === key ? { ...item, ...progress } : item)),
+            );
           },
         });
         if (mounted.current) {
+          // Succeeded: nothing left to retry, so drop the file handle.
+          setItems((current) =>
+            current.map((item) => (item.key === key ? { ...item, file: undefined } : item)),
+          );
           setPendingResumes(readResumeRecords(window.localStorage));
           setCompletionRevision((value) => value + 1);
         }
       } catch (error) {
-        if (mounted.current) {
-          setItems((current) =>
-            current.map((item) =>
-              item.key === key
-                ? {
-                    ...item,
-                    status: controller.signal.aborted ? "canceled" : "failed",
-                    error: getErrorMessage(error),
-                  }
-                : item,
-            ),
-          );
-          setPendingResumes(readResumeRecords(window.localStorage));
-        }
+        if (!mounted.current) return;
+        const canceled = controller.signal.aborted;
+        setItems((current) =>
+          current.map((item) =>
+            item.key === key
+              ? {
+                  ...item,
+                  status: canceled ? "canceled" : "failed",
+                  error: getErrorMessage(error),
+                  // Only a failure offers Retry; a cancel keeps nothing.
+                  file: canceled ? undefined : item.file,
+                }
+              : item,
+          ),
+        );
+        setPendingResumes(readResumeRecords(window.localStorage));
       }
     },
     [api],
@@ -163,10 +165,12 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     [completionRevision, pendingResumes, run],
   );
 
-  const cancel = async (item: UploadItem) => {
-    item.controller.abort();
-    if (item.uploadSessionId) {
-      await cancelUploadRequest(api, item.uploadSessionId, window.localStorage).catch(
+  const cancel = async (item: UploadTrayItem) => {
+    const target = items.find((candidate) => candidate.key === item.key);
+    if (!target) return;
+    target.controller.abort();
+    if (target.uploadSessionId) {
+      await cancelUploadRequest(api, target.uploadSessionId, window.localStorage).catch(
         () => undefined,
       );
     }
@@ -178,92 +182,42 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     );
   };
 
+  const retry = (item: UploadTrayItem) => {
+    const target = items.find((candidate) => candidate.key === item.key);
+    if (!target?.file) return;
+    // Continue the existing multipart session when one survived the failure.
+    const record = readResumeRecords(window.localStorage).find(
+      (candidate) => candidate.uploadSessionId === target.uploadSessionId,
+    );
+    void run(target.file, target.destinationFolderId, target.targetFileId, record, target.key);
+  };
+
+  const dismiss = (key: string) =>
+    setItems((current) => current.filter((candidate) => candidate.key !== key));
+
+  const trayItems: UploadTrayItem[] = items.map((item) => ({
+    key: item.key,
+    name: item.name,
+    status: item.status,
+    uploadedBytes: item.uploadedBytes,
+    totalBytes: item.totalBytes,
+    percent: item.percent,
+    completedParts: item.completedParts,
+    totalParts: item.totalParts,
+    error: item.error,
+  }));
+
   return (
     <UploadContext.Provider value={value}>
       {children}
-      {items.length ? (
-        <aside
-          className={`upload-tray ${expanded ? "upload-tray--expanded" : ""}`}
-          aria-label="Upload queue"
-        >
-          <header>
-            <div>
-              <UploadCloud aria-hidden="true" size={18} />
-              <strong>Uploads</strong>
-              <span className="upload-tray__summary">
-                {uploadSummary || `${items.length} queued`}
-              </span>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setExpanded((current) => !current)}
-              aria-label={expanded ? "Collapse uploads" : "Expand uploads"}
-            >
-              {expanded ? (
-                <ChevronDown aria-hidden="true" size={18} />
-              ) : (
-                <ChevronUp aria-hidden="true" size={18} />
-              )}
-            </Button>
-          </header>
-          {expanded ? (
-            <div className="upload-tray__items" aria-live="polite">
-              {items.map((item) => (
-                <div className="upload-item" key={item.key}>
-                  <div className="upload-item__top">
-                    <strong title={item.name}>{item.name}</strong>
-                    <StatusBadge status={item.status} />
-                  </div>
-                  <progress
-                    value={item.percent}
-                    max="100"
-                    aria-label={`${item.name} upload progress`}
-                  />
-                  <div className="upload-item__meta">
-                    <span>
-                      {formatFileSize(item.uploadedBytes)} / {formatFileSize(item.totalBytes)}
-                    </span>
-                    {item.totalParts > 1 ? (
-                      <span>
-                        {item.completedParts}/{item.totalParts} parts
-                      </span>
-                    ) : null}
-                  </div>
-                  {item.error ? <p role="alert">{item.error}</p> : null}
-                  <div className="upload-item__actions">
-                    {(["starting", "uploading", "completing"] as UploadUiStatus[]).includes(
-                      item.status,
-                    ) ? (
-                      <Button variant="ghost" size="small" onClick={() => void cancel(item)}>
-                        <X aria-hidden="true" size={14} /> Cancel
-                      </Button>
-                    ) : null}
-                    {item.status === "failed" ? (
-                      <span>
-                        <RotateCcw aria-hidden="true" size={14} /> Reselect from Files to resume
-                      </span>
-                    ) : null}
-                    {["completed", "canceled"].includes(item.status) ? (
-                      <Button
-                        variant="ghost"
-                        size="small"
-                        onClick={() =>
-                          setItems((current) =>
-                            current.filter((candidate) => candidate.key !== item.key),
-                          )
-                        }
-                      >
-                        Dismiss
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </aside>
-      ) : null}
+      <UploadTray
+        items={trayItems}
+        expanded={expanded}
+        onToggleExpanded={() => setExpanded((current) => !current)}
+        onCancel={(item) => void cancel(item)}
+        onDismiss={dismiss}
+        onRetry={retry}
+      />
     </UploadContext.Provider>
   );
 }

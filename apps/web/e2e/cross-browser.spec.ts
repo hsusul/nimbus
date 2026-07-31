@@ -22,8 +22,8 @@ test.describe("cross-browser console smoke", () => {
     await expect(page.getByRole("heading", { name: "Root" })).toBeVisible();
     await page.getByRole("button", { name: "New folder" }).click();
     await page.getByLabel("Name").fill(`${browserName} uploads`);
-    await page.getByRole("button", { name: "Save" }).click();
-    await page.getByRole("button", { name: new RegExp(`${browserName} uploads`) }).click();
+    await page.getByRole("button", { name: "Create folder" }).click();
+    await page.getByRole("button", { name: new RegExp("^" + `${browserName} uploads`) }).click();
     await expect(page.getByRole("heading", { name: `${browserName} uploads` })).toBeVisible();
 
     const fileName = `${browserName}-smoke.txt`;
@@ -37,12 +37,14 @@ test.describe("cross-browser console smoke", () => {
       buffer: Buffer.from(`${browserName} direct-to-storage smoke\n`),
     });
     await expect(page.getByText(fileName).first()).toBeVisible({ timeout: 45_000 });
-    await page.getByRole("button", { name: new RegExp(fileName) }).click();
+    await page.getByRole("button", { name: new RegExp("^" + fileName) }).click();
     await expect(page.getByRole("heading", { name: fileName })).toBeVisible();
     await page.getByRole("button", { name: "Close file details" }).click();
 
     await page.getByLabel(`Actions for ${fileName}`).click();
-    await page.getByRole("button", { name: "Move to trash", exact: true }).click();
+    // Menu entries expose role="menuitem" since the menu adopted the
+    // WAI-ARIA menu button pattern.
+    await page.getByRole("menuitem", { name: "Move to trash", exact: true }).click();
     await page.getByRole("button", { name: "Move to Trash", exact: true }).click();
     await page.getByRole("link", { name: "Trash" }).click();
     const trashRow = page.locator(".trash-row").filter({ hasText: fileName });
@@ -56,7 +58,7 @@ test.describe("cross-browser console smoke", () => {
 
     await page.getByRole("link", { name: "Search" }).click();
     await page.getByRole("searchbox", { name: "Search files and folders" }).fill(fileName);
-    await expect(page.getByRole("button", { name: new RegExp(fileName) })).toBeVisible();
+    await expect(page.getByRole("button", { name: new RegExp("^" + fileName) })).toBeVisible();
     await page.getByRole("link", { name: "Jobs" }).click();
     await expect(page.locator(".job-row").filter({ hasText: "Finalizing upload" })).toBeVisible();
     await page.getByRole("link", { name: "Trash" }).click();

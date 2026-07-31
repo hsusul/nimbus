@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "./button";
@@ -26,6 +26,10 @@ export function Dialog({
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // Unique per instance: two mounted dialogs previously collided on
+  // id="dialog-title", breaking aria-labelledby for both.
+  const titleId = useId();
+  const descriptionId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -37,7 +41,15 @@ export function Dialog({
           "button, a, input, select, textarea, [tabindex]:not([tabindex='-1'])",
         ) ?? []),
       ].filter((element) => !element.hasAttribute("disabled"));
-    focusable()[0]?.focus();
+    // Prefer the first meaningful control over the header close button, which
+    // is first in DOM order and a poor landing spot for keyboard users.
+    const elements = focusable();
+    const preferred =
+      dialog?.querySelector<HTMLElement>(
+        ".dialog__body input, .dialog__body select, .dialog__body textarea, .dialog__body button",
+      ) ?? elements.find((element) => !element.closest(".dialog__header"));
+    (preferred ?? elements[0])?.focus();
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onCloseRef.current();
       if (event.key !== "Tab") return;
@@ -73,13 +85,13 @@ export function Dialog({
         className={`dialog ${wide ? "dialog--wide" : ""}`}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="dialog-title"
-        aria-describedby={description ? "dialog-description" : undefined}
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
       >
         <header className="dialog__header">
           <div>
-            <h2 id="dialog-title">{title}</h2>
-            {description ? <p id="dialog-description">{description}</p> : null}
+            <h2 id={titleId}>{title}</h2>
+            {description ? <p id={descriptionId}>{description}</p> : null}
           </div>
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close dialog">
             <X aria-hidden="true" size={18} />

@@ -23,6 +23,13 @@ test("captures the launch portfolio surfaces with synthetic data", async ({ cont
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(page.getByRole("link", { name: "Search" })).toBeVisible();
+  // The drawer slides in; capture only once it has settled at x=0, otherwise
+  // the asset shows it partly off-screen mid-transition.
+  await page
+    .locator(".sidebar")
+    .evaluate((element) =>
+      Promise.all(element.getAnimations().map((animation) => animation.finished)),
+    );
   await shot(page, "files-mobile.png");
 
   await page.setViewportSize({ width: 1440, height: 1000 });

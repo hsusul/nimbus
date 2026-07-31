@@ -3,19 +3,33 @@
 import { MoreHorizontal } from "lucide-react";
 import type { ReactNode } from "react";
 
-export function ActionMenu({ label, children }: { label: string; children: ReactNode }) {
+import { Menu, MenuItem } from "./menu";
+
+/**
+ * Row-level action menu.
+ *
+ * Thin wrapper over the accessible `Menu` primitive so existing call sites
+ * (resource list, trash, jobs) keep the same shape. Previously built on
+ * `<details>`/`<summary>`, which is not an accessible menu.
+ */
+export function ActionMenu({
+  label,
+  children,
+  align = "end",
+}: {
+  label: string;
+  children: ReactNode;
+  align?: "start" | "end";
+}) {
   return (
-    <details className="action-menu">
-      <summary aria-label={label} title={label}>
-        <MoreHorizontal aria-hidden="true" size={18} />
-      </summary>
-      <div
-        className="action-menu__content"
-        onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")}
-      >
-        {children}
-      </div>
-    </details>
+    <Menu
+      className="action-menu"
+      label={label}
+      align={align}
+      trigger={<MoreHorizontal aria-hidden="true" size={15} />}
+    >
+      {children}
+    </Menu>
   );
 }
 
@@ -23,13 +37,10 @@ export function ActionMenuItem({
   children,
   danger = false,
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { danger?: boolean }) {
+}: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onSelect"> & { danger?: boolean }) {
   return (
-    <button
-      className={danger ? "action-menu__item action-menu__item--danger" : "action-menu__item"}
-      {...props}
-    >
+    <MenuItem danger={danger} {...props}>
       {children}
-    </button>
+    </MenuItem>
   );
 }

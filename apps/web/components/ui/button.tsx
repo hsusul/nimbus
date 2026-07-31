@@ -6,9 +6,19 @@ export const Button = forwardRef<
     children: ReactNode;
     variant?: "primary" | "secondary" | "ghost" | "danger";
     size?: "default" | "icon" | "small";
+    /** Disables the control and marks it busy for assistive technology. */
+    loading?: boolean;
   }
 >(function Button(
-  { children, variant = "secondary", size = "default", className = "", ...props },
+  {
+    children,
+    variant = "secondary",
+    size = "default",
+    loading = false,
+    disabled = false,
+    className = "",
+    ...props
+  },
   ref,
 ) {
   return (
@@ -16,6 +26,8 @@ export const Button = forwardRef<
       ref={ref}
       className={`button button--${variant} button--${size} ${className}`.trim()}
       {...props}
+      aria-busy={loading || undefined}
+      disabled={disabled || loading}
     >
       {children}
     </button>
