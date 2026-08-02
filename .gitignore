@@ -70,6 +70,8 @@ docs/
 docs/*
 !docs/assets/
 !docs/assets/**
+!docs/design-research/
+!docs/design-research/**
 notes/
 scratch/
 *.local.md

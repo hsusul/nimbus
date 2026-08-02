@@ -31,14 +31,24 @@ interface NavDestination {
   unavailable?: boolean;
 }
 
-const NAVIGATION: NavDestination[] = [
-  { href: "/files", label: "My Files", icon: FolderOpen },
-  { href: "/recent", label: "Recent", icon: Clock3, unavailable: true },
-  { href: "/shared", label: "Shared", icon: Users, unavailable: true },
-  { href: "/favorites", label: "Favorites", icon: Star, unavailable: true },
-  { href: "/search", label: "Search", icon: FileSearch },
-  { href: "/jobs", label: "Jobs", icon: BriefcaseBusiness },
-  { href: "/trash", label: "Trash", icon: Trash2 },
+const NAVIGATION: { label: string; destinations: NavDestination[] }[] = [
+  {
+    label: "Workspace",
+    destinations: [
+      { href: "/files", label: "My Files", icon: FolderOpen },
+      { href: "/recent", label: "Recent", icon: Clock3, unavailable: true },
+      { href: "/shared", label: "Shared", icon: Users, unavailable: true },
+      { href: "/favorites", label: "Favorites", icon: Star, unavailable: true },
+    ],
+  },
+  {
+    label: "Operations",
+    destinations: [
+      { href: "/search", label: "Search", icon: FileSearch },
+      { href: "/jobs", label: "Jobs", icon: BriefcaseBusiness },
+      { href: "/trash", label: "Trash", icon: Trash2 },
+    ],
+  },
 ];
 
 const UNAVAILABLE_REASON = "Not available yet";
@@ -84,34 +94,39 @@ export const Sidebar = forwardRef<
       </div>
 
       <nav aria-label="Sections">
-        {NAVIGATION.map(({ href, label, icon: Icon, unavailable }) => {
-          if (unavailable) {
-            return (
-              <span
-                key={href}
-                className="nav-link nav-link--unavailable"
-                aria-disabled="true"
-                title={UNAVAILABLE_REASON}
-              >
-                <Icon aria-hidden="true" size={15} strokeWidth={1.8} />
-                <span>{label}</span>
-                <small>Soon</small>
-              </span>
-            );
-          }
-          const active = pathname.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={active ? "nav-link nav-link--active" : "nav-link"}
-              aria-current={active ? "page" : undefined}
-            >
-              <Icon aria-hidden="true" size={15} strokeWidth={1.8} />
-              <span>{label}</span>
-            </Link>
-          );
-        })}
+        {NAVIGATION.map((group) => (
+          <div className="nav-section" key={group.label}>
+            <p className="nav-section__label">{group.label}</p>
+            {group.destinations.map(({ href, label, icon: Icon, unavailable }) => {
+              if (unavailable) {
+                return (
+                  <span
+                    key={href}
+                    className="nav-link nav-link--unavailable"
+                    aria-disabled="true"
+                    title={UNAVAILABLE_REASON}
+                  >
+                    <Icon aria-hidden="true" size={15} strokeWidth={1.8} />
+                    <span>{label}</span>
+                    <small>Soon</small>
+                  </span>
+                );
+              }
+              const active = pathname.startsWith(href);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={active ? "nav-link nav-link--active" : "nav-link"}
+                  aria-current={active ? "page" : undefined}
+                >
+                  <Icon aria-hidden="true" size={15} strokeWidth={1.8} />
+                  <span>{label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       <StorageSummary storage={user.storage} />

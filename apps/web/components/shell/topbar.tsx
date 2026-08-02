@@ -3,7 +3,7 @@
 import type { MeResponse } from "@nimbus/contracts";
 import { Menu as MenuIcon, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { forwardRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 
 import { Button } from "../ui/button";
 import { AccountMenu } from "./account-menu";
@@ -24,6 +24,29 @@ export const Topbar = forwardRef<
 >(function Topbar({ user, productionAuth, mobileOpen, onToggleNavigation }, menuButtonRef) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const focusQuickSearch = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        event.key !== "/" ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        (target instanceof HTMLElement &&
+          (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)))
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    };
+
+    window.addEventListener("keydown", focusQuickSearch);
+    return () => window.removeEventListener("keydown", focusQuickSearch);
+  }, []);
 
   return (
     <header className="console-topbar">
@@ -58,12 +81,14 @@ export const Topbar = forwardRef<
           Quick search
         </label>
         <input
+          ref={searchInputRef}
           id="global-search-input"
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Quick search files and folders"
         />
+        <kbd aria-hidden="true">/</kbd>
       </form>
 
       <AccountMenu user={user} productionAuth={productionAuth} />

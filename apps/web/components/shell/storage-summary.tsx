@@ -41,7 +41,7 @@ export function StorageSummary({ storage }: { storage: MeResponse["data"]["stora
       </p>
       {level !== "ok" ? (
         <p className="sidebar-storage__alert">
-          {level === "full" ? "Storage full — uploads will fail." : "Storage almost full."}
+          {level === "full" ? "Storage full. Uploads will fail." : "Storage almost full."}
         </p>
       ) : null}
     </section>

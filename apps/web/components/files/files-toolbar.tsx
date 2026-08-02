@@ -57,21 +57,11 @@ export function FilesToolbar({
 
       <div className="files-toolbar__actions">
         <div className="view-toggle" role="group" aria-label="View">
-          <button
-            type="button"
-            aria-pressed={view === "list"}
-            onClick={() => onViewChange("list")}
-            title="List view"
-          >
+          <button type="button" aria-pressed={view === "list"} onClick={() => onViewChange("list")}>
             <List aria-hidden="true" size={14} />
             <span className="sr-only">List view</span>
           </button>
-          <button
-            type="button"
-            aria-pressed={view === "grid"}
-            onClick={() => onViewChange("grid")}
-            title="Grid view"
-          >
+          <button type="button" aria-pressed={view === "grid"} onClick={() => onViewChange("grid")}>
             <LayoutGrid aria-hidden="true" size={14} />
             <span className="sr-only">Grid view</span>
           </button>
