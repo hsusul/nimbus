@@ -46,6 +46,16 @@ export function redactString(value: string): string {
     const url = new URL(value);
     let changed = false;
 
+    if (url.username) {
+      url.username = "[REDACTED]";
+      changed = true;
+    }
+
+    if (url.password) {
+      url.password = "[REDACTED]";
+      changed = true;
+    }
+
     for (const key of Array.from(url.searchParams.keys())) {
       if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) {
         url.searchParams.set(key, "[REDACTED]");
@@ -53,11 +63,17 @@ export function redactString(value: string): string {
       }
     }
 
-    return changed ? url.toString() : value;
+    return redactEmbeddedSecrets(changed ? url.toString() : value);
   } catch {
-    return value
-      .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
-      .replace(/\bnmb_live_[A-Za-z0-9_-]+\b/g, "[REDACTED]")
-      .replace(/((?:token|secret|signature|api[_-]?key)=)[^&\s]+/gi, "$1[REDACTED]");
+    return redactEmbeddedSecrets(value).replace(
+      /((?:token|secret|signature|api[_-]?key)=)[^&\s]+/gi,
+      "$1[REDACTED]",
+    );
   }
+}
+
+function redactEmbeddedSecrets(value: string): string {
+  return value
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
+    .replace(/\bnmb_live_[A-Za-z0-9_-]+\b/g, "[REDACTED]");
 }
