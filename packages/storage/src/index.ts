@@ -2,6 +2,7 @@ export {
   S3CompatibleStorageProvider,
   type S3CompatibleStorageProviderOptions,
 } from "./minio-provider";
+export { buildContentDisposition } from "./content-disposition";
 export {
   buildSinglePartUploadObjectKey,
   buildThumbnailObjectKey,

@@ -13,6 +13,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
+import { buildContentDisposition } from "./content-disposition";
 import {
   ObjectNotFoundError,
   type AbortMultipartUploadInput,
@@ -74,7 +75,7 @@ export class S3CompatibleStorageProvider implements ObjectStorageProvider {
       Bucket: input.bucket,
       Key: input.objectKey,
       ResponseContentType: input.contentType,
-      ResponseContentDisposition: `attachment; filename="${sanitizeDispositionFilename(input.filename)}"`,
+      ResponseContentDisposition: buildContentDisposition(input.filename),
     });
 
     return sign(command, this.client, input.expiresInSeconds);
@@ -235,8 +236,4 @@ async function sign(
     }),
     expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
   };
-}
-
-function sanitizeDispositionFilename(filename: string): string {
-  return filename.replace(/[\\"]/g, "_");
 }
