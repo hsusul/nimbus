@@ -2,7 +2,7 @@
 
 Nimbus is a production-configurable cloud file workspace built to demonstrate storage-system engineering end to end. It combines direct-to-object-storage uploads, immutable versions, deny-by-default sharing, authorization-safe search, durable workers, and a responsive web console.
 
-**Status:** Managed web/API/data/storage integration is validated at [Nimbus Web](https://nimbus-web-psi.vercel.app) and [Nimbus API](https://nimbus-api-q8bc.onrender.com). GitHub OAuth, eight migrations, managed PostgreSQL/Redis readiness, private R2 CORS, direct browser upload, and worker-driven finalization from a local worker have passed. The permanent Render worker and remaining operational gates are still pending; this is not yet a fully validated production launch.
+**Status:** Managed web/API/data/storage integration is validated at [Nimbus Web](https://nimbus-web-psi.vercel.app) and [Nimbus API](https://nimbus-api-q8bc.onrender.com). GitHub OAuth, nine migrations, managed PostgreSQL/Redis readiness, private R2 CORS, direct browser upload, and worker-driven finalization from a local worker have passed. The permanent Render worker and remaining operational gates are still pending; this is not yet a fully validated production launch.
 
 ## Product Overview
 
