@@ -16,17 +16,7 @@ Cloud storage looks simple until uploads fail halfway through, permissions chang
 
 ![Nimbus Files console](docs/assets/files-desktop.png)
 
-| Mobile navigation                              | Direct upload progress                              |
-| ---------------------------------------------- | --------------------------------------------------- |
-| ![Mobile layout](docs/assets/files-mobile.png) | ![Upload progress](docs/assets/upload-progress.png) |
-| File details                                   | Sharing and public links                            |
-| ![File details](docs/assets/file-details.png)  | ![Sharing](docs/assets/sharing.png)                 |
-| Search                                         | Background jobs                                     |
-| ![Search](docs/assets/search.png)              | ![Jobs](docs/assets/jobs.png)                       |
-| Trash                                          |                                                     |
-| ![Trash](docs/assets/trash.png)                |                                                     |
-
-All screenshots are generated from deterministic synthetic demo data with `pnpm screenshots:capture`.
+The screenshot is generated from deterministic synthetic demo data with `pnpm screenshots:capture`.
 
 ## Key Features
 
