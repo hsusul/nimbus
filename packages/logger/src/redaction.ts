@@ -9,8 +9,28 @@ const SENSITIVE_QUERY_PARAMS = new Set([
   "signature",
   "token",
   "access_token",
+  "refresh_token",
+  "id_token",
   "api_key",
+  "api-key",
+  "apikey",
+  "secret",
+  "authorization",
+  "password",
 ]);
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Redact `name=value` pairs for any sensitive parameter, wherever they appear
+// in a string. Unlike `URL.searchParams`, this also covers URL fragments (e.g.
+// OAuth `#access_token=...`) and strings that are not valid URLs, keeping the
+// query-parameter allowlist and the free-text fallback from drifting apart.
+const SENSITIVE_PARAM_PATTERN = new RegExp(
+  `((?:${Array.from(SENSITIVE_QUERY_PARAMS, escapeRegExp).join("|")})=)[^&\\s]+`,
+  "gi",
+);
 
 export type Redactable =
   null | undefined | string | number | boolean | Redactable[] | { [key: string]: Redactable };
@@ -42,9 +62,21 @@ export function redact(input: Redactable): Redactable {
 }
 
 export function redactString(value: string): string {
+  const scrubbed = redactEmbeddedSecrets(value).replace(SENSITIVE_PARAM_PATTERN, "$1[REDACTED]");
+
   try {
-    const url = new URL(value);
+    const url = new URL(scrubbed);
     let changed = false;
+
+    if (url.username) {
+      url.username = "[REDACTED]";
+      changed = true;
+    }
+
+    if (url.password) {
+      url.password = "[REDACTED]";
+      changed = true;
+    }
 
     for (const key of Array.from(url.searchParams.keys())) {
       if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) {
@@ -53,11 +85,14 @@ export function redactString(value: string): string {
       }
     }
 
-    return changed ? url.toString() : value;
+    return changed ? url.toString() : scrubbed;
   } catch {
-    return value
-      .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
-      .replace(/\bnmb_live_[A-Za-z0-9_-]+\b/g, "[REDACTED]")
-      .replace(/((?:token|secret|signature|api[_-]?key)=)[^&\s]+/gi, "$1[REDACTED]");
+    return scrubbed;
   }
+}
+
+function redactEmbeddedSecrets(value: string): string {
+  return value
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
+    .replace(/\bnmb_live_[A-Za-z0-9_-]+\b/g, "[REDACTED]");
 }
