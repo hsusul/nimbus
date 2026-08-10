@@ -426,7 +426,9 @@ function validateProductionApi(
   validateHttpsUrl(config.PUBLIC_WEB_URL, "PUBLIC_WEB_URL");
   validateHttpsUrl(config.PUBLIC_API_URL, "PUBLIC_API_URL");
   validateSecret(config.API_AUTH_SECRET, "API_AUTH_SECRET");
-  if (!parseOrigins(config.ALLOWED_WEB_ORIGINS ?? "").includes(config.PUBLIC_WEB_URL)) {
+  if (
+    !parseOrigins(config.ALLOWED_WEB_ORIGINS ?? "").includes(new URL(config.PUBLIC_WEB_URL).origin)
+  ) {
     throw new Error("ALLOWED_WEB_ORIGINS must include PUBLIC_WEB_URL.");
   }
 }

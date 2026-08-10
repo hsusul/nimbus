@@ -139,4 +139,50 @@ describe("config validation", () => {
     expect(config.authMode).toBe("authjs");
     expect(config.devAuth).toBeNull();
   });
+
+  it("accepts a production API profile when PUBLIC_WEB_URL matches an allowed origin apart from a trailing slash", () => {
+    const secret = "production-secret-value-that-is-long-enough-123";
+    const config = getApiConfig({
+      NODE_ENV: "production",
+      DEPLOYMENT_PROFILE: "production",
+      AUTH_MODE: "authjs",
+      DEV_AUTH_ENABLED: "false",
+      DATABASE_URL: "postgresql://user:pass@db.example.com:5432/nimbus",
+      REDIS_URL: "rediss://redis.example.com:6379",
+      PUBLIC_WEB_URL: "https://nimbus.example.com/",
+      PUBLIC_API_URL: "https://api.nimbus.example.com",
+      ALLOWED_WEB_ORIGINS: "https://nimbus.example.com",
+      API_AUTH_SECRET: `${secret}-api`,
+      S3_ENDPOINT: "https://s3.example.com",
+      S3_ACCESS_KEY_ID: "access-key-id",
+      S3_SECRET_ACCESS_KEY: secret,
+      S3_BUCKET: "nimbus-prod",
+      S3_REGION: "us-east-1",
+    });
+
+    expect(config.allowedWebOrigins).toContain("https://nimbus.example.com");
+  });
+
+  it("rejects a production API profile when no allowed origin matches PUBLIC_WEB_URL", () => {
+    const secret = "production-secret-value-that-is-long-enough-123";
+    expect(() =>
+      getApiConfig({
+        NODE_ENV: "production",
+        DEPLOYMENT_PROFILE: "production",
+        AUTH_MODE: "authjs",
+        DEV_AUTH_ENABLED: "false",
+        DATABASE_URL: "postgresql://user:pass@db.example.com:5432/nimbus",
+        REDIS_URL: "rediss://redis.example.com:6379",
+        PUBLIC_WEB_URL: "https://nimbus.example.com",
+        PUBLIC_API_URL: "https://api.nimbus.example.com",
+        ALLOWED_WEB_ORIGINS: "https://other.example.com",
+        API_AUTH_SECRET: `${secret}-api`,
+        S3_ENDPOINT: "https://s3.example.com",
+        S3_ACCESS_KEY_ID: "access-key-id",
+        S3_SECRET_ACCESS_KEY: secret,
+        S3_BUCKET: "nimbus-prod",
+        S3_REGION: "us-east-1",
+      }),
+    ).toThrow(/ALLOWED_WEB_ORIGINS must include PUBLIC_WEB_URL/);
+  });
 });
